@@ -18,12 +18,17 @@ def hugging_face_model()->ChatHuggingFace:
 
     llm = HuggingFaceEndpoint(
         repo_id="mistralai/Mistral-7B-Instruct-v0.2",  # Specify the HuggingFace model repo
-        task="text-generation"  
+        #repo_id="google/gemma-2b-it",
+        task="text-generation",
+        max_new_tokens=128,
+        temperature=0.2
+
     )
 
     # Create a chat model using HuggingFace
     model = ChatHuggingFace(llm=llm)
     print("✅ LLM ready!")
+
     return model
 
 
@@ -34,8 +39,10 @@ def gemini_ai_model()->ChatGoogleGenerativeAI:
         raise ValueError("Error: GOOGLE_API_KEY not found in environment.")
     
     model = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",  # Specify the Google Gemini model
+        model="gemini-2.5-flash-lite",  # Specify the Google Gemini model
          #google_api_key=os.getenv("GOOGLE_API_KEY"),
     )
     print("✅ LLM ready!")
     return model
+
+
