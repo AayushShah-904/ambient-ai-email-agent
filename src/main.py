@@ -5,10 +5,11 @@ workflow = graph_create()
 output = workflow.invoke({
     "messages": [],
     "mail": {
-        "subject": "Grammarly Premium Offer",
-        "body": "Write better with Grammarly Premium - 50 percentage off.",
+        "subject": "Meeting tomorrow?",
+        "body": "Hi, can we meet at 3pm tomorrow? Thanks!"
+        "",
     },
-    "tool_name": None,
+    "tomol_nae": None,
     "tool_args": None,
     "final_reply": None,
 })

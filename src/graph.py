@@ -10,6 +10,26 @@ from node import (  triage_node,
     react_tools_node,)
 
 
+# from langgraph.checkpoint.memory import InMemorySaver
+# from langgraph.prebuilt import create_react_agent
+# from hitls import add_human_in_the_loop, DANGEROUS_TOOL_NAMES
+
+# def build_agent(llm, tools):
+#     safe_tools = []
+#     for t in tools:
+#         if t.name in DANGEROUS_TOOL_NAMES:
+#             safe_tools.append(add_human_in_the_loop(t))
+#         else:
+#             safe_tools.append(t)
+
+#     checkpointer = InMemorySaver()
+
+#     agent = create_react_agent(
+#         model=llm,
+#         tools=safe_tools,
+#         checkpointer=checkpointer,
+#     )
+#     return agent
 
 #initilized graph
 def graph_create()->StateGraph:
@@ -63,3 +83,21 @@ def graph_create()->StateGraph:
     
 
     return graph.compile()
+
+app=graph_create()
+
+def run_email_agent(subject: str, body: str) -> dict:
+    """Run the LangGraph agent on one email and return triage + reply."""
+    initial_state = {
+        "mail": {
+            "subject": subject,
+            "body": body,
+        }
+    }
+    result = app.invoke(initial_state)
+
+    # Adapt these keys to whatever your state uses
+    return {
+        "triage": result.get("triage_category"),
+        "reply": result.get("final_reply") ,
+    }

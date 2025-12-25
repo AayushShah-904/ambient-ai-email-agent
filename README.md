@@ -1,188 +1,270 @@
-# langgraph-email-assistant
-"Building an Ambient Agent with LangGraph for an Email Assistant"
-<br>
-Intelligent ambient agent leveraging LangGraph to process, analyze, and automate email workflows with real-time assistance and proactive insights.
+# Ambient Email Agent (Triage + ReAct + Evaluation)
 
-# Ambient Email Agent with LangGraph
+This project is an email assistant built with **LangGraph**, **LLMs** (Gemini / Hugging Face), and **LangSmith**.  
+It can:
 
-Stateful, ambient email assistant built with **LangGraph**, **LangChain**, **Gemini (Google GenAI)** and optionally **Hugging Face** models, plus **LangSmith** for tracing and evaluation.
+- Classify incoming emails into:
+  - `ignore`
+  - `notify-human`
+  - `respond-act`
+- For `respond-act`, run a small **ReAct loop**:
+  - Decide whether to call safe mock tools (like `read_calendar`)
+  - Draft a reply using the tool results
 
----
-
-## 1. Environment Setup
-
-### 1.1. Python & Virtual Env
-
-python3.11 -m venv .venv
-source .venv/bin/activate # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
+Milestone 2 adds an automated **LLM-as-a-judge** evaluation framework in LangSmith that scores the quality of the agent’s replies (helpfulness, tone, instruction-following).[web:195][web:174]
 
 ---
 
-## 2. Environment Variables
-
-Create a `.env` file in the project root:
-
-===== LLM PROVIDERS =====
-Google Gemini (Google GenAI)
-GOOGLE_API_KEY=your_gemini_api_key_here
-
-Hugging Face (optional provider)
-HUGGINGFACEHUB_API_TOKEN=your_hf_token_here
-
-===== LangSmith (Tracing & Evaluation) =====
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
-LANGCHAIN_API_KEY=your_langsmith_api_key_here
-LANGCHAIN_PROJECT=ambient-email-agent
-
-===== Gmail / Calendar (used later) =====
-GMAIL_CLIENT_ID=your_gmail_oauth_client_id
-GMAIL_CLIENT_SECRET=your_gmail_oauth_client_secret
-GMAIL_REFRESH_TOKEN=your_gmail_refresh_token
-
-===== General =====
-ENV=dev
+## 1. Project structure
 
 
-> Never commit `.env` to Git. Add it to `.gitignore`.
+
+## 1. Project Structure
+
+<img width="792" height="618" alt="image" src="https://github.com/user-attachments/assets/39b02f00-04f0-4ba5-8d08-fee41cb67360" />
+
 
 ---
 
-## 3. LLM Setup
+## 2. LLM + LangSmith config (`config.py`)
 
-LLMs are configured in `src/config.py`. This project supports:
-
-- **Primary**: Google Gemini via `langchain-google-genai`
-- **Optional**: Hugging Face models via `langchain` integrations
-
-### 3.1. Gemini (Google GenAI) Client
-
-src/config.py
-import os
-from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-load_dotenv()
-
-def get_gemini_llm() -> ChatGoogleGenerativeAI:
-return ChatGoogleGenerativeAI(
-model="gemini-2.0-flash-exp", # or another Gemini model
-google_api_key=os.getenv("GOOGLE_API_KEY"),
-temperature=0.3,
-)
-
-
-### 3.2. Hugging Face LLM (Optional)
-
-You can also plug in a Hugging Face chat model for local/alternative experiments:
-
-src/config.py (continued)
-from langchain.chat_models import ChatOpenAI
-from langchain_huggingface import ChatHuggingFace
-
-def get_hf_llm() -> ChatHuggingFace:
-# Example: use a Hugging Face Inference Endpoint or hosted model
-return ChatHuggingFace(
-repo_id="mistralai/Mistral-7B-Instruct-v0.3", # change to your model
-huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"),
-temperature=0.3,
-)
-
-
-> In the rest of the project, use a small factory function (e.g. `get_llm(provider="gemini")`) so you can switch providers without changing all nodes.
+- Configures chat models:
+  - `gemini_ai_model()` → Google Gemini chat model.
+  - `hugging_face_model()` → optional Hugging Face chat model.
+- Loads API keys from `.env` (Gemini, Hugging Face, LangSmith).  
+- With `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` set, all LangGraph runs are traced into LangSmith for debugging and evaluation.[web:195][web:188]
 
 ---
 
-## 4. Datasets
+## 3. State definition (`state.py`)
 
-The project uses **small, curated email datasets** for triage and evaluation, stored in the `data/` folder.
-
-### 4.1. Triage Test Set (Milestone 1)
-
-File: `data/test_emails.csv`
-
-Used to measure **triage accuracy** on 25–50 examples.
-
-**Schema (CSV):**
-
-id,subject,body,label,ideal_response
-1,"Meeting tomorrow?","Hi, can we meet at 3pm tomorrow? Thanks!","respond_act","Confirm 3pm, ask for agenda"
-2,"Newsletter: Weekly Update","This week we shipped X, Y, Z...","ignore",""
-3,"Urgent: Server down","Production server crashed NOW","notify_human","Flag for immediate human review"
+Shared state that flows through the graph:
 
 
-- `label` is one of: `ignore`, `notify_human`, `respond_act`
-- `ideal_response` is a short description of what a good agent reply / behavior should be
+class AgentState(TypedDict):
+messages: list[BaseMessage] # conversation history
+mail: dict # {"subject": str, "body": str}
+triage_category: Literal["ignore", "notify-human", "respond-act"]
+tool_name: str | None # name of tool to call (inside ReAct)
+tool_args: dict | None # arguments for that tool
+final_reply: str | None # drafted reply for respond-act emails
 
-### 4.2. Evaluation Dataset (Milestone 2+)
 
-File: `data/eval_dataset.jsonl` (recommended) or `data/eval_dataset.json`
+- `messages` – chat history the ReAct loop reasons over.  
+- `mail` – current email being processed.  
+- `triage_category` – output of the triage step.  
+- `tool_name` / `tool_args` – used only when a tool is called.  
+- `final_reply` – final drafted reply for `respond-act` emails.
 
-Each line is a JSON object representing one test case for LangSmith:
+---
 
-{
-"id": "email_001",
-"subject": "Need confirmation for Friday meeting",
-"body": "Hi, can you confirm if we are still on for Friday at 3 PM?",
-"label": "respond_act",
-"ideal_response": "Confirm Friday 3 PM, polite tone, ask if any agenda items."
+## 4. Triage node (`node.py` – `triage_node`)
+
+- Reads `state["mail"]["subject"]` and `state["mail"]["body"]`.  
+- Calls the LLM with a prompt that explains three categories:
+  - **ignore** – newsletters, promos, low‑value notifications.
+  - **notify-human** – important / urgent; user must see or decide.
+  - **respond-act** – needs a reply or concrete action.
+- Parses the model output into a `triage_category`.  
+- `check_route` then routes:
+  - `ignore` → `ignore` node → `END`
+  - `notify-human` → `notify_human` node → `END`
+  - `respond-act` → ReAct loop (starts at `react_model`)
+
+Milestone 1 evaluates this triage step using `data/test_emails.csv` and a confusion matrix.[file:194]
+
+---
+
+## 5. ReAct loop nodes
+
+### 5.1 `react_model_node`
+
+- Reads `mail` and `messages` from state.  
+- Builds a prompt that:
+  - Describes available tools (`read_calendar`, `get_user_prefs`, etc.).  
+  - Includes the email subject and body.
+- LLM responds with either:
+  - A **tool call** (JSON with `"tool"` and `"tool_args"`), or  
+  - A **final reply** string.
+
+Behavior:
+
+- On tool call:
+  - Sets `tool_name` / `tool_args` in state.
+  - Routes to `react_tools_node`.
+- On final reply:
+  - Sets `final_reply`.
+  - Clears `tool_name` / `tool_args`.
+  - The graph ends.
+
+### 5.2 `react_tools_node`
+
+- Checks `state["tool_name"]`.  
+- Calls the matching mock tool:
+  - `"read_calendar"` → returns fixed free slots.  
+  - `"get_user_prefs"` → returns fixed greeting/closing.  
+- Appends a `[TOOL_RESULT] ...` message into `messages`.  
+- Clears `tool_name` / `tool_args`.  
+- Sends control back to `react_model_node` to continue reasoning.
+
+This forms a standard ReAct loop inside LangGraph.[web:224]
+
+---
+
+## 6. Graph flow (`graph.py`) and `run_email_agent()`
+
+- Uses `StateGraph(AgentState)` to wire nodes:
+
+  - `START → triage_node`  
+  - Conditional routing based on `triage_category`:
+    - `ignore` → `ignore` → `END`
+    - `notify-human` → `notify-human` → `END`
+    - `respond-act` → `react_model` ReAct subgraph
+
+- ReAct subgraph: `react_model ↔ react_tools` until a final reply is produced.
+
+Helper function exposed in `graph.py`:
+
+def run_email_agent(subject: str, body: str) -> dict:
+"""Run the graph on a single email and return triage + reply."""
+result = app.invoke({"mail": {"subject": subject, "body": body}})
+return {
+"triage": result.get("triage_category"),
+"reply": result.get("final_reply"),
 }
 
-text
 
-- Target size: **100+** labeled examples.
-- Upload this file as a **Dataset** in LangSmith for automated evaluation.
-
-### 4.3. Creating Your Own Dataset
-
-- Start with manually written or anonymized emails that reflect your real use cases.
-- Label each with:
-  - `label` (`ignore` / `notify_human` / `respond_act`)
-  - `ideal_response` description
-- Keep the dataset small but high‑quality at first; you can expand later.
+`run_email_agent` is used by the evaluation runner to process each dataset row.
 
 ---
 
-## 5. Running Basic Checks
+## 7. Evaluation framework (Milestone 2)
 
-### 5.1. Test LLM Connectivity
+### 7.1 Golden evaluation dataset
 
-python -m src.sanity_check_llm
+- File: `data/golden_set_emails.jsonl`  
+- Contains 100+ realistic emails with:
+  - `id`
+  - `subject`
+  - `body`
+  - `triage_label` (expected triage category)
+  - `ideal_response` (short description of the perfect reply / outcome)
+- Uploaded to LangSmith as a Dataset (e.g. `Golden_DataSet`), mapping:
+  - Inputs: `subject`, `body`
+  - References: `ideal_response`, `triage_label`.[web:195]
 
-text
+### 7.2 LLM‑as‑a‑judge evaluator in LangSmith
 
-Example `src/sanity_check_llm.py`:
+Custom evaluator (e.g. `email_judge`) whose prompt tells the judge to read:
 
-from config import get_gemini_llm
+- Original email (subject + body)  
+- Ideal outcome (`ideal_response`)  
+- Assistant reply (`model_output`)
 
-if name == "main":
-llm = get_gemini_llm()
-resp = llm.invoke("Say hello from the ambient email agent project.")
-print(resp)
+The judge returns three numeric scores (1–5):
 
-text
+- **helpfulness** – does the reply address the main request and move the task forward?  
+- **tone** – is the tone polite and professionally appropriate?  
+- **instruction_following** – how well does it match the ideal outcome (dates, confirmations, actions)?[web:174]
 
-### 5.2. Explore Datasets in a Notebook
+These three criteria are configured in the UI as 1–5 score fields.
+
+### 7.3 Evaluation runner (`src/eval_runner.py`)
+
+Connects dataset, agent, and judge:
+
+from langsmith import Client
+from langsmith.evaluation import evaluate
+from graph import run_email_agent
+
+client = Client()
+
+def eval_wrapper(example):
+subject = example.inputs["subject"]
+body = example.inputs["body"]
+result = run_email_agent(subject=subject, body=body)
+return {
+"model_output": result["reply"], # graded by email_judge
+"triage_prediction": result["triage"] # optional extra field
+}
+
+results = evaluate(
+eval_wrapper,
+data="Golden_DataSet", # LangSmith dataset name
+evaluators=["email_judge"], # LLM-as-a-judge evaluator
+experiment_prefix="milestone-2",
+)
+
+
+Running this script:
+
+- Executes the agent on all 100+ emails.  
+- Calls the judge on each output.  
+- Logs an experiment in LangSmith with per‑example and aggregate scores.[web:198][web:268]
+
+You can inspect:
+
+- Average `helpfulness` / `tone` / `instruction_following` per experiment.  
+- Individual traces for low‑scoring cases.
+
+This fulfills Milestone 2’s requirement for a fully automated evaluation framework.[web:188]
+
+---
+
+## 8. Notebooks
+
+### 8.1 `01_triage_evaluation.ipynb`
+
+- Loads `data/test_emails.csv`.  
+- Runs each email through the graph.  
+- Compares `triage_category` vs `label` and prints accuracy + confusion matrix (Milestone 1).
+
+### 8.2 `02_react_agent.ipynb`
+
+- Defines a few `respond-act` emails.  
+- Runs the full graph and prints:
+  - Input email
+  - `triage_category`
+  - `final_reply` from the ReAct loop  
+- Used to visually inspect ReAct behavior.
+
+### 8.3 `03_evaluation.ipynb`
+
+- Optional notebook front‑end for Milestone 2:
+  - Inspect the Golden dataset.  
+  - Trigger `evaluate(...)` runs.  
+  - Pull and visualize LangSmith metrics (histograms, averages).[web:188]
+
+---
+
+## 9. How to run
+
+### 9.1 Install and set up
+
+pip install -r requirements.txt
+
+Create `.env`:
+
+GOOGLE_API_KEY=your_gemini_key
+LANGCHAIN_API_KEY=your_langsmith_key
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_PROJECT=ambient-email-agent
+
+### 9.2 Run from terminal
+
+python -m src.main
+
+
+You should see:
+
+- The triage result for the test email.  
+- For `respond-act`, logs from the ReAct loop and the final drafted reply.
+
+### 9.3 Run notebooks
 
 jupyter lab notebooks/
 
-text
-
-In a notebook, you can load and inspect:
-
-import pandas as pd
-
-df = pd.read_csv("data/test_emails.csv")
-df.head()
-
-text
-
----
-
-You can extend this `README.md` later with sections for:
-
-- Graph diagram of the LangGraph workflow
-- HITL (Human-in-the-Loop) setup
-- Deployment with FastAPI / Streamlit
+- Open `01_triage_evaluation.ipynb` to test triage accuracy.  
+- Open `02_react_agent.ipynb` to inspect ReAct behavior.  
+- Open `03_evaluation.ipynb` to run and analyze LangSmith evaluations.

@@ -1,18 +1,17 @@
-# tools.py
-from datetime import datetime, timedelta
+from typing import Dict, Any
 
-def read_calendar():
-    today = datetime.now().date()
-    slots = [
-        {"date": str(today), "time": "15:00-16:00"},
-        {"date": str(today + timedelta(days=1)), "time": "10:00-11:00"},
-    ]
-    return {"available_slots": slots}
-
-def get_user_prefs():
-    
+# Accept **kwargs so the tool never crashes on extra input
+def read_calendar(**kwargs) -> Dict[str, Any]:
+    # We ignore kwargs for now, but this prevents the crash
     return {
-        "preferred_greeting": "Hi",
-        "preferred_closing": "Best regards",
-        "meeting_default_duration_minutes": 30,
+        "free_slots": [
+            {"day": "Monday", "start": "15:00", "end": "16:00"},
+            {"day": "Wednesday", "start": "10:00", "end": "10:30"},
+        ]
+    }
+
+def get_user_prefs(**kwargs) -> Dict[str, str]:
+    return {
+        "greeting": "Hi",
+        "signoff": "Best regards,\nAayush",
     }

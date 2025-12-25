@@ -11,6 +11,10 @@ import os
 # load_dotenv(dotenv_path=env_path)
 
 load_dotenv()
+
+LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
+LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT", "ambient-email-agent")
+
 def hugging_face_model()->ChatHuggingFace:
 
     if not os.getenv("HUGGINGFACEHUB_API_TOKEN"):
@@ -44,5 +48,3 @@ def gemini_ai_model()->ChatGoogleGenerativeAI:
     )
     print("✅ LLM ready!")
     return model
-
-
