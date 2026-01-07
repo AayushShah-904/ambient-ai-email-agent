@@ -1,7 +1,11 @@
-import time
+import json
 from langsmith import Client, evaluate
-from graph import run_email_agent  # Assuming your agent is here
+from src.graph import create_graph  # Assuming your agent is here
+from langgraph.checkpoint.memory import MemorySaver
+from langsmith.evaluation import LangChainStringEvaluator
 
+checkpointer = MemorySaver()
+config = {"configurable": {"thread_id": "hitl-demo"}}
 # --- STEP 1: PREPARE THE DATASET (Run once to be safe) ---
 def ensure_dataset_exists():
     client = Client()
@@ -37,23 +41,25 @@ def ensure_dataset_exists():
 
 # --- STEP 2: THE WRAPPER (Adapts Dataset -> Agent -> Judge) ---
 def eval_wrapper(inputs):
-    time.sleep(15)
     # 1. Extract Inputs (Matches your dataset keys)
     print(f"DEBUG - Actual Keys: {list(inputs.keys())}")
     
     subj = inputs["subject"]
     body_text = inputs["body"]
+    initial_state = {
+        "mail": {"subject": subj, "body": body_text},
+        "messages": []
+    }
 
+    app = create_graph()
     # 2. Run your Agent
-    # (This assumes run_email_agent returns {'reply': '...', 'triage': '...'})
-    result = run_email_agent(subject=subj, body=body_text)
-    
+    # (This assumes create_graph returns {'reply': '...', 'triage': '...'})
+    result = app.invoke(initial_state,config)
 
-    # 3. Format Output for the Judge
-    # Your Judge Prompt expects: 'output.model_output'
+    # 3. Format Output for the Judgecls
     return {
-        "model_output": result["reply"],      # The text reply
-        "triage_prediction": result["triage"] # The category
+        "model_output": result.get("final_reply", None),  
+        "triage_prediction": result.get("triage_category", "unknown")
     }
 
 
@@ -66,8 +72,8 @@ results = evaluate(
     eval_wrapper,
     data="Golden_DataSet-2",
     evaluators=[], # Empty because we use the "email_judge" in UI
-    experiment_prefix="email-bot-v5",
-    metadata={"version": "1.4", "model": "gemini-2.5-flash"}
+    experiment_prefix="email-bot-v2",
+    metadata={"version": "1.2", "model": "gemini-2.5-flash"}
 ) 
     
 print("\nSucesssfully Evaluated")
