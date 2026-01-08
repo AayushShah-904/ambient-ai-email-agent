@@ -40,7 +40,7 @@ def gemini_ai_model()->ChatGoogleGenerativeAI:
         raise ValueError("Error: GOOGLE_API_KEY not found in environment.")
     
     model = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",  # Specify the Google Gemini model
+        model="gemini-2.5-flash-lite",  # Specify the Google Gemini model
          #google_api_key=os.getenv("GOOGLE_API_KEY"),
     )
     print("✅ LLM ready!")

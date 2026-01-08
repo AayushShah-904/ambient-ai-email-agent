@@ -74,12 +74,12 @@ def mark_as_processed(msg_id: str) -> bool:
         print(f'Could not modify label: {e}')
         return False
 
-def fetch_emails(query: str = 'in:inbox is:unread -label:trash -label:spam') -> list:
+def fetch_emails(query: str = 'in:inbox is:unread -category:social -category:promotions -category:updates -category:forums') -> list:
     """Fetch PRIMARY inbox unread emails only (read-only safe)."""
     service = get_gmail_service()
     results = service.users().messages().list(
         userId='me', 
-        q=query,  # Primary inbox only
+        q=query,  
         maxResults=10
     ).execute()
     messages = results.get('messages', [])

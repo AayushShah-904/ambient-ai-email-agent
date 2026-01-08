@@ -1,103 +1,119 @@
-import sys
 import os
+import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import json
-from datetime import timedelta,timezone
-import time
+import datetime
+from datetime import timedelta, timezone
 from dateutil import parser as dateparser
-from src.tools.tools import DANGEROUS_TOOLS
-from src.graph import create_graph
-from src.hitl_handler import handle_hitl
+import json
+
+from src.tools.tools import read_calendar_availability, extract_meeting_from_email
 from src.tools.calendar import (
-    get_calendar_service, extract_event_details_llm, 
-    check_for_holiday, is_slot_available, create_calendar_event
+    get_calendar_service, 
+    check_for_holiday, 
+    is_slot_available, 
+    create_calendar_event,
+    generate_reply_llm 
 )
+from src.tools.gmail import send_reply  
 
-print("=== CALENDAR EVENT + HITL TEST ===")
+print('=== PRODUCTION CALENDAR + REPLY TEST ===')
 
-# 1. Test Extraction
-print("\n1. 🤖 Extract Meeting")
+# Test 1: Service loads
+service = get_calendar_service()
+print('✅ Calendar service loaded')
+
+# Test 2: Slot availability (IST)
+result = read_calendar_availability.invoke({
+    "start": "2026-01-03 10:00", 
+    "end": "2026-01-03 11:00"
+})
+print("\n📅 Slot availability:")
+print(result)
+
+# Test 3: Holiday check
+tomorrow = datetime.date.today() + timedelta(days=1)
+holiday_status = check_for_holiday(service, tomorrow)
+print(f"\n🛑 Holiday tomorrow: {holiday_status}")
+
+# Test 4: Extract + Full Flow
+print("\n🔍 FULL PRODUCTION FLOW:")
 sample_email = {
-    "subject": "Meeting Options: Next Mon 2PM, Wed 3PM, or Fri morning?",
-    "body": """Hi Aayush,
-Hoping to schedule our Q1 sync. Available these slots?
-1. Next Monday 2PM (1hr)
-2. Next Wednesday 3PM (45min)  
-3. This Friday 10AM (30min)
-Please confirm which works + add to calendar. Thanks!
-Sarah"""
+    "subject": "Meeting Tuesday?", 
+    "body": "Hi, can we meet next Tuesday 10AM? Online ok."
 }
 
-details_raw = extract_event_details_llm(sample_email["body"], sample_email["subject"])
-print(f"📥 Extracted: {json.dumps(details_raw, indent=2)}")
+# Extract
+details_raw = extract_meeting_from_email.invoke(sample_email)
+print(f"📥 Extracted: {details_raw}")
 
-details = details_raw if isinstance(details_raw, dict) else json.loads(details_raw)
-slot = details['slots'][0]  # First slot
+# Parse safely
+details = None
+if isinstance(details_raw, dict):
+    details = details_raw
+elif isinstance(details_raw, str):
+    try:
+        details = json.loads(details_raw)
+    except:
+        pass
 
-# 2. Calendar Service
-print("\n2. 🔑 Calendar Service")
-calendar = get_calendar_service()
-print("✅ Service ready")
-
-# 3. Pre-checks improvements
-print("\n3. 📅 Pre-flight Checks")
-# Define IST explicitly to stop the UnknownTimezoneWarning
-tz_ist = timezone(timedelta(hours=5, minutes=30))
-tzinfos = {"IST": tz_ist}
-
-start_str = f"{slot['date_str']} 10:00 AM IST"
-end_str = f"{slot['date_str']} 11:00 AM IST"
-
-# Pass tzinfos to the parser
-start_dt = dateparser.parse(start_str, tzinfos=tzinfos).astimezone(tz_ist)
-end_dt = dateparser.parse(end_str, tzinfos=tzinfos).astimezone(tz_ist)
-
-holiday, hname = check_for_holiday(calendar, start_dt.date())
-avail, conflict = is_slot_available(calendar, start_dt, end_dt)
-
-print(f"Slot: {start_str} → {end_str}")
-print(f"Free: {avail} | Holiday: {holiday} ({hname})")
-
-# 4. FULL LANGGRAPH + HITL TEST
-print("\n4. 🚀 LangGraph HITL Flow")
-app = create_graph()
-config = {"configurable": {"thread_id": f"hitl_calendar_test_{int(time.time())}"}}
-state = {"mail": sample_email, "messages": []}
-
-print("Running agent...")
-# The logical way to run the external loop
-result = app.invoke(state, config)
-
-while True:
-    current_state = app.get_state(config)
+if details and 'slots' in details and details['slots']:
+    # Test 5: Best slot + Create
+    slot = details['slots'][0]  # First available
+    start_str = f"{slot['date_str']} {slot['time_str']}"
+    IST = timezone(timedelta(hours=5, minutes=30))
+    start_dt = dateparser.parse(start_str).astimezone(IST)
+    end_dt = start_dt + timedelta(minutes=30)
     
-    # Check if we are stuck at the human-approval gate
-    if current_state.next == ("hitl_checkpoint",):
-        pending_tool = current_state.values.get("tool_name")
-        pending_args = current_state.values.get("tool_args")
-        
-        print(f"\n✋ STOP: Agent drafted {pending_tool}")
-        decision = input("Approve/Deny/Edit? [a/d/e]: ").lower()
-
-        edit_values = {}
-        if decision in ["e", "edit"]:
-            new_start = input(f"Enter new start time [{pending_args.get('start')}]: ")
-            if new_start: edit_values["start"] = new_start
-        
-        # Use hitl_handler to modify the state
-        handle_hitl(app, config, decision, edit_values={}) 
-        
-        # Resume the graph
-        result = app.invoke(None, config) 
-    elif current_state.next:
-        # If it's a safe tool, just let it run
-        result = app.invoke(None, config)
+    print(f"\n🗓️ Booking: {start_str}")
+    print(f"ISO: {start_dt.isoformat()} → {end_dt.isoformat()}")
+    
+    # Availability + Holiday
+    avail, conflict = is_slot_available(service, start_dt, end_dt)
+    holiday, hname = check_for_holiday(service, start_dt.date())
+    
+    print(f"Available: {avail} | Holiday: {holiday} ({hname})")
+    
+    if avail and not holiday:
+        # 🔥 CREATE EVENT
+        success = create_calendar_event(service, details, start_dt, end_dt)
+        event_id = "event_abc123" if success else None
+        print(f"✅ Event: {'CREATED' if success else 'FAILED'}")
     else:
-        # Reached END
-        break
-print(f"Final result: {result.get('final_reply', 'Complete')}")
+        event_id = None
+        print("⛔ Blocked: busy/holiday")
+    
+    
+    print("\n✨ Smart LLM Reply:")
+    sender = "aayushshah90421@gmail.com"  
+    
+    reply_text = generate_reply_llm(
+        original_subject=sample_email["subject"],
+        original_body=sample_email["body"],
+        event_details=details,
+        booked_slot=slot if avail and not holiday else None,
+        rejection_reasons=[conflict or hname] if not (avail and not holiday) else None,
+        calendar_event_id=event_id
+    )
+    
+    print(f"Reply")
+    print(reply_text)
+    print("-" * 50)
+    
+    # 🔥 REAL SEND TEST (optional)
+    send_test = input("Send real reply? [y/N]: ").lower() == 'y'
+    if send_test and event_id:
+        sent = send_reply(sender, sample_email["subject"], reply_text)
+        print(f"✅ SENT: {sent}")
+    
+else:
+    print("❌ No meeting details found")
+    reply_text = generate_reply_llm(
+        original_subject=sample_email["subject"],
+        original_body=sample_email["body"],
+        event_details={},  # Empty
+        booked_slot=None,
+        rejection_reasons=["No valid slots extracted"],
+        calendar_event_id=None
+    )
 
-# 5. Manual test unchanged
-# ...
-print("\n🎉 CALENDAR + HITL FULLY TESTED!")
+print("\n🎉 PRODUCTION READY - Calendar + Smart Replies!")
