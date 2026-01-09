@@ -7,7 +7,7 @@ from src.graph import create_graph
 from src.hitl_handler import handle_hitl
 
 def test_hitl_force_no_llm():
-    config = {"configurable": {"thread_id": "hitl-test-force-no-llm"}}
+    config = {"configurable": {"thread_id": "hitl-test-force-v6"}}
     app = create_graph()
     
     print("🚨 FORCE HITL TEST (NO LLM GENERATION)")

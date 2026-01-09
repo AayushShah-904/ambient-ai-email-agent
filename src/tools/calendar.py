@@ -146,7 +146,7 @@ def book_best_slot(calendar:Resource, event_data: Dict) -> Tuple[bool, Optional[
         
         # Parse TZ-aware
         full_time_str = f"{slot['date_str']} {slot['time_str']} IST"
-        start_dt = date_parser.parse(full_time_str).astimezone(IST)
+        start_dt =date_parser.parse(full_time_str, tzinfos={('IST',): IST}).astimezone(IST)
         end_dt = start_dt + timedelta(hours=1)
         
         # 1. Holiday check
