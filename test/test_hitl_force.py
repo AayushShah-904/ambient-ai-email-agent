@@ -1,10 +1,21 @@
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# import sys
+# import os
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+# import sys
+# import os
+
+# # Get the absolute path of the directory where 'test' folder lives
+# # This should be 'D:\...\langgraph-email-assistant'
+# project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# if project_root not in sys.path:
+#     sys.path.insert(0, project_root)
+    
 import uuid
 from typing import Dict, Any
-from src.graph import create_graph
-from src.hitl_handler import handle_hitl
+from backend.src.graph import create_graph
+from backend.src.hitl_handler import handle_hitl
 
 def test_hitl_force_no_llm():
     config = {"configurable": {"thread_id": "hitl-test-force-v6"}}

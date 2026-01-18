@@ -1,10 +1,9 @@
-# test_node.py
-import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# import os
+# import sys
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.nodes.node import triage_node, react_model_node, react_tools_node, react_route
-from src.state import AgentState
+from backend.src.nodes.node import triage_node, react_model_node, react_tools_node, react_route
+from backend.src.state import AgentState
 
 print("----------------NODE TESTS----------------") 
 

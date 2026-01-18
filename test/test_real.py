@@ -1,15 +1,10 @@
-
-import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import datetime
 from datetime import timedelta, timezone
 from dateutil import parser as dateparser
 import json
 
-# ✅ USE YOUR REAL PRODUCTION FILES
-from src.tools.gmail import (get_gmail_service, fetch_emails, send_reply, mark_as_processed, get_sender_and_subject, get_clean_body)
-from src.tools.calendar import (get_calendar_service, extract_event_details_llm, check_for_holiday, is_slot_available, 
+from backend.src.tools.google_gmail import (get_gmail_service, fetch_emails, send_reply, mark_as_processed, get_sender_and_subject, get_clean_body)
+from backend.src.tools.google_calendar import (get_calendar_service, extract_event_details_llm, check_for_holiday, is_slot_available, 
                      book_best_slot, generate_reply_llm)
 
 print('=== PRODUCTION AI EMAIL AGENT ===')

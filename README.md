@@ -1,42 +1,41 @@
-# Ambient Email Agent (Triage + ReAct + Evaluation)
+# Ambient Email Agent (Triage + ReAct Loop)
 
-This project is an email assistant built with **LangGraph**, **LLMs** (Gemini / Hugging Face), and **LangSmith**.  
-It can:
+This project is an **email assistant** built with **LangGraph + LLMs (Gemini / Hugging Face)**.
 
-- Classify incoming emails into:
+Right now it can:
+
+- Classify an email as:
   - `ignore`
   - `notify-human`
   - `respond-act`
-- For `respond-act`, run a small **ReAct loop**:
-  - Decide whether to call safe mock tools (like `read_calendar`)
-  - Draft a reply using the tool results
+- If it is `respond-act`, it runs a small **ReAct loop**:
+  - The LLM decides whether to **call safe mock tools** (like `read_calendar`)
+  - Then drafts a reply using the tool results
 
-Milestone 2 adds an automated **LLM-as-a-judge** evaluation framework in LangSmith that scores the quality of the agent’s replies (helpfulness, tone, instruction-following).[web:195][web:174]
+This is the base for an ambient email agent that will later get HITL, memory, and real Gmail/Calendar integration.
 
 ---
-
-## 1. Project structure
-
-
 
 ## 1. Project Structure
 
-<img width="792" height="618" alt="image" src="https://github.com/user-attachments/assets/39b02f00-04f0-4ba5-8d08-fee41cb67360" />
+<img width="727" height="523" alt="image" src="https://github.com/user-attachments/assets/20e14f5f-6854-4f8d-8617-830219fb4d16" />
 
 
 ---
 
-## 2. LLM + LangSmith config (`config.py`)
+## 2. LLM Config (`config.py`)
 
-- Configures chat models:
-  - `gemini_ai_model()` → Google Gemini chat model.
-  - `hugging_face_model()` → optional Hugging Face chat model.
-- Loads API keys from `.env` (Gemini, Hugging Face, LangSmith).  
-- With `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` set, all LangGraph runs are traced into LangSmith for debugging and evaluation.[web:195][web:188]
+We configure chat models:
+
+- `gemini_ai_model()` → Google Gemini chat model.  
+- `hugging_face_model()` → Hugging Face chat model (optional).
+
+API keys are loaded from `.env` using `python-dotenv`.  
+Nodes call these functions to get an LLM instance.
 
 ---
 
-## 3. State definition (`state.py`)
+## 3. State Definition (`state.py`)
 
 Shared state that flows through the graph:
 
@@ -49,222 +48,468 @@ tool_name: str | None # name of tool to call (inside ReAct)
 tool_args: dict | None # arguments for that tool
 final_reply: str | None # drafted reply for respond-act emails
 
-
-- `messages` – chat history the ReAct loop reasons over.  
-- `mail` – current email being processed.  
-- `triage_category` – output of the triage step.  
-- `tool_name` / `tool_args` – used only when a tool is called.  
-- `final_reply` – final drafted reply for `respond-act` emails.
+- `messages` – chat history used by the ReAct loop.  
+- `mail` – the email being processed.  
+- `triage_category` – result from the triage node.  
+- `tool_name` / `tool_args` – used only when the LLM wants to call a tool.  
+- `final_reply` – final drafted email text for `respond-act` emails.
 
 ---
 
-## 4. Triage node (`node.py` – `triage_node`)
+## 4. Triage Node (`node.py` – `triage_node`)
+
+The **triage node**:
 
 - Reads `state["mail"]["subject"]` and `state["mail"]["body"]`.  
-- Calls the LLM with a prompt that explains three categories:
-  - **ignore** – newsletters, promos, low‑value notifications.
-  - **notify-human** – important / urgent; user must see or decide.
-  - **respond-act** – needs a reply or concrete action.
-- Parses the model output into a `triage_category`.  
-- `check_route` then routes:
-  - `ignore` → `ignore` node → `END`
-  - `notify-human` → `notify_human` node → `END`
-  - `respond-act` → ReAct loop (starts at `react_model`)
+- Calls the LLM with a prompt that explains 3 categories:
 
-Milestone 1 evaluates this triage step using `data/test_emails.csv` and a confusion matrix.[file:194]
+  - `ignore`: newsletters, promotions, auto-notifications  
+  - `notify-human`: urgent or important, user should see it  
+  - `respond-act`: needs a reply or action
+
+- Parses the model output into a `Category` object.  
+- Returns `{"triage_category": "ignore" | "notify-human" | "respond-act"}`.
+
+`check_route` then looks at `triage_category` and routes:
+
+- `ignore` → `ignore` node → END.  
+- `notify-human` → `notify_human` node → END.  
+- `respond-act` → into the ReAct loop starting at `react_model`.
 
 ---
 
-## 5. ReAct loop nodes
+## 5. ReAct Loop Nodes
 
-### 5.1 `react_model_node`
+### 5.1 ReAct model node (`react_model_node`)
 
-- Reads `mail` and `messages` from state.  
-- Builds a prompt that:
-  - Describes available tools (`read_calendar`, `get_user_prefs`, etc.).  
-  - Includes the email subject and body.
-- LLM responds with either:
-  - A **tool call** (JSON with `"tool"` and `"tool_args"`), or  
-  - A **final reply** string.
+This is the **"brain"** of the ReAct loop:
 
-Behavior:
+1. Reads `mail` and `messages` from state.  
+2. Builds a `HumanMessage` with:
+   - Instructions about tools (`read_calendar`, `get_user_prefs`).  
+   - The email subject and body.  
+3. Sends all messages to the LLM and gets back `text`.  
+4. If `text` looks like JSON with `"tool"`:
+   - Parse `tool_name` and `tool_args`.  
+   - Set them in the state so the graph calls `react_tools`.  
+5. Otherwise:
+   - Treat `text` as the final reply.  
+   - Set `final_reply = text` and clear `tool_name` / `tool_args`.
 
-- On tool call:
-  - Sets `tool_name` / `tool_args` in state.
-  - Routes to `react_tools_node`.
-- On final reply:
-  - Sets `final_reply`.
-  - Clears `tool_name` / `tool_args`.
-  - The graph ends.
+In simple terms:
 
-### 5.2 `react_tools_node`
+> `react_model_node` decides: "Do we need a tool next, or can I answer now?"
+
+### 5.2 ReAct tools node (`react_tools_node`)
+
+This node runs **safe mock tools**:
 
 - Checks `state["tool_name"]`.  
-- Calls the matching mock tool:
-  - `"read_calendar"` → returns fixed free slots.  
-  - `"get_user_prefs"` → returns fixed greeting/closing.  
-- Appends a `[TOOL_RESULT] ...` message into `messages`.  
+- If `"read_calendar"`, calls `read_calendar()` (returns fixed free slots).  
+- If `"get_user_prefs"`, calls `get_user_prefs()` (returns fixed greeting/closing).  
+- Appends a message like `[TOOL_RESULT] read_calendar: {...}` to `messages`.  
 - Clears `tool_name` / `tool_args`.  
-- Sends control back to `react_model_node` to continue reasoning.
+- Sends state back to `react_model_node`.
 
-This forms a standard ReAct loop inside LangGraph.[web:224]
+This creates the loop:
+
+react_model_node → react_tools_node → react_model_node → ... → final_reply
+
 
 ---
 
-## 6. Graph flow (`graph.py`) and `run_email_agent()`
+## 6. Graph Flow (`graph.py`)
 
-- Uses `StateGraph(AgentState)` to wire nodes:
+The LangGraph wiring:
 
-  - `START → triage_node`  
-  - Conditional routing based on `triage_category`:
-    - `ignore` → `ignore` → `END`
-    - `notify-human` → `notify-human` → `END`
-    - `respond-act` → `react_model` ReAct subgraph
+<img width="480" height="446" alt="image" src="https://github.com/user-attachments/assets/59d217a9-0999-414c-ba71-34faf1e5e2b6" />
 
-- ReAct subgraph: `react_model ↔ react_tools` until a final reply is produced.
-
-Helper function exposed in `graph.py`:
-
-def run_email_agent(subject: str, body: str) -> dict:
-"""Run the graph on a single email and return triage + reply."""
-result = app.invoke({"mail": {"subject": subject, "body": body}})
-return {
-"triage": result.get("triage_category"),
-"reply": result.get("final_reply"),
-}
-
-
-`run_email_agent` is used by the evaluation runner to process each dataset row.
+- `triage_node` sets `triage_category`.  
+- `check_route` chooses the correct branch.  
+- `respond-act` emails go into the ReAct subgraph:  
+  - `react_model` ↔ `react_tools` until `final_reply` is set.
 
 ---
 
-## 7. Evaluation framework (Milestone 2)
+## 7. Notebooks
 
-### 7.1 Golden evaluation dataset
-
-- File: `data/golden_set_emails.jsonl`  
-- Contains 100+ realistic emails with:
-  - `id`
-  - `subject`
-  - `body`
-  - `triage_label` (expected triage category)
-  - `ideal_response` (short description of the perfect reply / outcome)
-- Uploaded to LangSmith as a Dataset (e.g. `Golden_DataSet`), mapping:
-  - Inputs: `subject`, `body`
-  - References: `ideal_response`, `triage_label`.[web:195]
-
-### 7.2 LLM‑as‑a‑judge evaluator in LangSmith
-
-Custom evaluator (e.g. `email_judge`) whose prompt tells the judge to read:
-
-- Original email (subject + body)  
-- Ideal outcome (`ideal_response`)  
-- Assistant reply (`model_output`)
-
-The judge returns three numeric scores (1–5):
-
-- **helpfulness** – does the reply address the main request and move the task forward?  
-- **tone** – is the tone polite and professionally appropriate?  
-- **instruction_following** – how well does it match the ideal outcome (dates, confirmations, actions)?[web:174]
-
-These three criteria are configured in the UI as 1–5 score fields.
-
-### 7.3 Evaluation runner (`src/eval_runner.py`)
-
-Connects dataset, agent, and judge:
-
-from langsmith import Client
-from langsmith.evaluation import evaluate
-from graph import run_email_agent
-
-client = Client()
-
-def eval_wrapper(example):
-subject = example.inputs["subject"]
-body = example.inputs["body"]
-result = run_email_agent(subject=subject, body=body)
-return {
-"model_output": result["reply"], # graded by email_judge
-"triage_prediction": result["triage"] # optional extra field
-}
-
-results = evaluate(
-eval_wrapper,
-data="Golden_DataSet", # LangSmith dataset name
-evaluators=["email_judge"], # LLM-as-a-judge evaluator
-experiment_prefix="milestone-2",
-)
-
-
-Running this script:
-
-- Executes the agent on all 100+ emails.  
-- Calls the judge on each output.  
-- Logs an experiment in LangSmith with per‑example and aggregate scores.[web:198][web:268]
-
-You can inspect:
-
-- Average `helpfulness` / `tone` / `instruction_following` per experiment.  
-- Individual traces for low‑scoring cases.
-
-This fulfills Milestone 2’s requirement for a fully automated evaluation framework.[web:188]
-
----
-
-## 8. Notebooks
-
-### 8.1 `01_triage_evaluation.ipynb`
+### 7.1 `01_triage_test.ipynb`
 
 - Loads `data/test_emails.csv`.  
 - Runs each email through the graph.  
-- Compares `triage_category` vs `label` and prints accuracy + confusion matrix (Milestone 1).
+- Compares `triage_category` vs the `label` in the CSV.  
+- Prints accuracy and confusion matrix (Milestone 1 triage testing).
 
-### 8.2 `02_react_agent.ipynb`
+### 7.2 `02_react_agent.ipynb`
 
-- Defines a few `respond-act` emails.  
-- Runs the full graph and prints:
-  - Input email
-  - `triage_category`
-  - `final_reply` from the ReAct loop  
-- Used to visually inspect ReAct behavior.
+- Creates a small list/DataFrame of **respond-act style** emails.  
+- For each email:
+  - Calls `graph_create()` to get the workflow.  
+  - Invokes the graph with an initial state.  
+  - Prints:
+    - The input email.  
+    - The `triage_category`.  
+    - The `final_reply` from the ReAct loop.
 
-### 8.3 `03_evaluation.ipynb`
+This notebook is used to **see the ReAct loop in action** and to demo the behavior to your mentor.
 
-- Optional notebook front‑end for Milestone 2:
-  - Inspect the Golden dataset.  
-  - Trigger `evaluate(...)` runs.  
-  - Pull and visualize LangSmith metrics (histograms, averages).[web:188]
+### 7.3 `03_evaluation.ipynb` (placeholder for later)
+
+- Will be used in Milestone 2 to:
+  - Connect to LangSmith,  
+  - Upload a 100+ email dataset,  
+  - Run automated evals (LLM-as-judge) on triage and replies.
 
 ---
 
-## 9. How to run
+## 8. How to Run
 
-### 9.1 Install and set up
+### 8.1 Install and set up
 
 pip install -r requirements.txt
 
-Create `.env`:
+Create `.env` with your keys:
 
 GOOGLE_API_KEY=your_gemini_key
-LANGCHAIN_API_KEY=your_langsmith_key
-LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=ambient-email-agent
+HUGGINGFACEHUB_API_TOKEN=your_hf_token # optional
 
-### 9.2 Run from terminal
-
-python -m src.main
+### 8.2 Run from terminal
 
 
 You should see:
 
-- The triage result for the test email.  
+- The triage result.  
 - For `respond-act`, logs from the ReAct loop and the final drafted reply.
 
-### 9.3 Run notebooks
+### 8.3 Run notebooks
 
 jupyter lab notebooks/
 
-- Open `01_triage_evaluation.ipynb` to test triage accuracy.  
-- Open `02_react_agent.ipynb` to inspect ReAct behavior.  
-- Open `03_evaluation.ipynb` to run and analyze LangSmith evaluations.
+- Open `01_triage_test.ipynb` to test triage accuracy.  
+- Open `02_react_agent.ipynb` to inspect and demo the ReAct behavior.
+
+---
+
+## 9. Backend API (FastAPI)
+
+The backend is a **FastAPI** application (`backend/src/main.py`) that exposes RESTful endpoints for email processing and user authentication.
+
+### 9.1 Key Endpoints
+
+#### **Authentication**
+- `GET /auth/login` – Initiates Google OAuth2 flow
+- `GET /auth/callback` – OAuth2 callback handler, stores user tokens in PostgreSQL
+
+#### **Email Processing**
+- `POST /v1/scan-and-draft` – Scans inbox, triages emails, and generates draft replies
+  - Request: `{"userid": "user@example.com"}`
+  - Response: Returns email category, draft reply (if `respond-act`), and thread ID
+
+#### **HITL Actions**
+- `POST /v1/approve-action` – Approve/Edit/Deny AI-generated drafts
+  - Request: `{"thread_id": "...", "action": "approve|edit|deny", "user_id": "...", "edited_text": "..."}`
+  - Response: Sends email via Gmail API or marks as read
+
+### 9.2 Run Backend Server
+
+cd backend
+uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+
+Backend will be available at `http://localhost:8000`.
+
+---
+
+## 10. Frontend (Streamlit UI)
+
+The frontend is a **Streamlit** web application (`frontend/app.py`) that provides a user-friendly interface for email management.
+
+### 10.1 Features
+
+- **Google OAuth Login** – Secure authentication via OAuth2
+- **Email Scanning** – One-click inbox scanning
+- **Draft Review** – View AI-generated replies
+- **HITL Controls** – Approve, edit, or deny drafts
+- **Real-time Feedback** – Category-based UI notifications
+
+### 10.2 Run Frontend Server
+
+streamlit run frontend/app.py --server.port 8501
+
+Frontend will be available at `http://localhost:8501`.
+
+---
+
+## 11. Gmail & Calendar Integration
+
+### 11.1 Gmail Tools (`backend/src/tools/google_gmail.py`)
+
+- `fetch_emails()` – Fetches unread emails from user's inbox
+- `send_reply()` – Sends email replies via Gmail API
+- `mark_as_processed()` – Marks emails as read
+- `apply_gmail_label()` – Applies custom labels (e.g., "AI-Notify")
+
+### 11.2 Calendar Tools (`backend/src/tools/google_calendar.py`)
+
+- `extract_event_details_llm()` – Uses LLM to detect meeting requests
+- `generate_reply_llm()` – Generates replies with calendar availability
+
+**Smart Meeting Detection:**
+- If email contains meeting request → Generates reply with calendar slots
+- If simple informational email → Generates brief acknowledgment (no calendar mention)
+
+---
+
+## 12. Database Setup (PostgreSQL)
+
+The agent uses **PostgreSQL** for:
+- **User token storage** (OAuth credentials)
+- **LangGraph checkpointing** (conversation state persistence)
+
+### 12.1 Database Schema
+
+**1. User Tokens Table:**
+
+```sql
+CREATE TABLE user_tokens (
+    user_id VARCHAR PRIMARY KEY,
+    access_token VARCHAR,
+    refresh_token VARCHAR,
+    token_uri VARCHAR,
+    client_id VARCHAR,
+    client_secret VARCHAR,
+    scopes VARCHAR,
+    expiry TIMESTAMP
+);
+```
+
+**2. LangGraph Checkpoint Tables:**
+
+These are automatically created by `AsyncPostgresSaver.setup()` during app startup.
+
+### 12.2 Configure Database
+
+1. Install PostgreSQL
+2. Create a database:
+
+```bash
+createdb email_assistance_db
+```
+
+3. Update `.env`:
+
+```
+DATABASE_URL=postgresql://username:password@localhost:5432/email_assistance_db
+```
+
+---
+
+## 13. Human-in-the-Loop (HITL) Workflow
+
+The agent implements a **multi-stage HITL workflow** for user control:
+
+### 13.1 Workflow Stages
+
+```mermaid
+graph TD
+    A[Email Received] --> B[Triage Classification]
+    B --> C{Category?}
+    C -->|ignore| D[Mark as Read]
+    C -->|notify-human| E[Label as AI-Notify]
+    C -->|respond-act| F[Generate Draft Reply]
+    F --> G[Pause for Human Review]
+    G --> H{User Decision}
+    H -->|Approve| I[Send Original Draft]
+    H -->|Edit| J[Send Edited Version]
+    H -->|Deny| K[Mark as Read Only]
+```
+
+### 13.2 HITL Decision Points
+
+- **Triage Stage** – Automated (LLM classifies)
+- **Draft Review Stage** – **Human approval required** (via Streamlit UI)
+- **Final Action** – Human confirms send/edit/deny
+
+This ensures the agent **never sends emails without explicit user approval**.
+
+---
+
+## 14. Authentication Flow
+
+### 14.1 OAuth2 Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select existing)
+3. Enable APIs:
+   - Gmail API
+   - Google Calendar API
+   - Google People API
+4. Create OAuth 2.0 credentials:
+   - Application type: **Web application**
+   - Authorized redirect URIs: `http://localhost:8000/auth/callback`
+5. Download credentials as `credentials.json`
+6. Place in `credentials/credentials.json`
+
+### 14.2 User Login Flow
+
+1. User clicks **"Login with Google"** in Streamlit UI
+2. Redirected to Google OAuth consent screen
+3. After approval, redirected to `/auth/callback`
+4. Backend stores tokens in PostgreSQL
+5. User redirected back to Streamlit with `user_id` parameter
+
+---
+
+## 15. Environment Variables
+
+Create `.env` file from `.env.example`:
+
+
+Required variables:
+
+```env
+# LLM API Keys
+GOOGLE_API_KEY=your_gemini_api_key_here
+HUGGINGFACEHUB_API_TOKEN=your_hf_token_here  # optional
+
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/email_assistance_db
+
+# LangSmith (Optional - for monitoring)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+LANGCHAIN_API_KEY=your_langsmith_api_key_here
+LANGCHAIN_PROJECT=ambient-email-agent
+```
+
+---
+
+## 16. Project Architecture
+
+### 16.1 Directory Structure
+
+```
+langgraph-email-assistant/
+├── backend/
+│   └── src/
+│       ├── main.py              # FastAPI server
+│       ├── graph.py             # LangGraph workflow
+│       ├── nodes/               # Graph nodes
+│       ├── tools/               # Gmail/Calendar tools
+│       ├── config.py            # LLM configuration
+│       └── state.py             # Agent state definition
+├── frontend/
+│   ├── app.py                   # Streamlit UI
+│   └── app_mock.py              # Mock version (no Gmail)
+├── credentials/
+│   └── credentials.json         # OAuth credentials
+├── data/
+│   └── test_emails.csv          # Test dataset
+├── notebooks/
+│   ├── 01_triage_test.ipynb     # Triage evaluation
+│   ├── 02_react_agent.ipynb     # ReAct demo
+│   └── 03_evaluation.ipynb      # LangSmith evals
+├── test/                        # Unit tests
+├── .env                         # Environment variables
+└── requirements.txt             # Python dependencies
+```
+
+### 16.2 Technology Stack
+
+| Component | Technology |
+|-----------|-----------|
+| **LLM Framework** | LangChain + LangGraph |
+| **AI Models** | Google Gemini 2.5 Flash |
+| **Backend API** | FastAPI |
+| **Frontend UI** | Streamlit |
+| **Database** | PostgreSQL + AsyncPostgresSaver |
+| **Email/Calendar** | Gmail API, Google Calendar API |
+| **Authentication** | OAuth2 (Google) |
+| **Monitoring** | LangSmith (optional) |
+
+---
+
+## 17. Testing
+
+### 17.1 Run Unit Tests
+
+```bash
+pytest test/ -v
+```
+
+### 17.2 Available Tests
+
+- `test_triage.py` – Triage accuracy evaluation
+- `test_calendar.py` – Calendar integration tests
+- `test_gmail.py` – Gmail API tests
+- `test_hitl.py` – HITL workflow tests
+- `test_real_api.py` – End-to-end API tests
+
+---
+
+## 18. Deployment (Production)
+
+### 18.1 Prerequisites
+
+- PostgreSQL instance (e.g., AWS RDS, Google Cloud SQL)
+- Domain with HTTPS (required for OAuth in production)
+- Cloud hosting (e.g., AWS EC2, Google Cloud Run, Heroku)
+
+### 18.2 Update OAuth Redirect URIs
+
+In Google Cloud Console:
+- Add production redirect URI: `https://yourdomain.com/auth/callback`
+
+### 18.3 Deploy Backend
+
+```bash
+# Using Docker (recommended)
+docker build -t email-assistant-backend .
+docker run -p 8000:8000 --env-file .env email-assistant-backend
+
+# Or using Gunicorn
+gunicorn backend.src.main:app -w 4 -k uvicorn.workers.UvicornWorker
+```
+
+### 18.4 Deploy Frontend
+
+```bash
+# Update app.py backend URL to production
+streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
+```
+
+---
+
+## 19. Troubleshooting
+
+### 19.1 Common Issues
+
+**Issue:** `WARNING:psycopg.pool:error connecting in 'pool-1'`
+- **Solution:** Check `DATABASE_URL` in `.env`, ensure PostgreSQL is running
+
+**Issue:** "Cannot connect to backend server"
+- **Solution:** Ensure FastAPI is running on port 8000: `uvicorn backend.src.main:app --port 8000`
+
+**Issue:** OAuth redirect fails
+- **Solution:** Verify redirect URI matches `credentials.json` exactly
+
+**Issue:** LLM suggests calendar for non-meeting emails
+- **Solution:** The agent now includes smart meeting detection (v1.2+)
+```
+
+## 20. Acknowledgments
+
+- **LangChain & LangGraph** – For the agent framework
+- **Google Gemini** – For LLM capabilities
+- **FastAPI & Streamlit** – For web framework
+- **Gmail & Calendar APIs** – For email/calendar integration
+
+---
+
+## 21. Support
+
+For questions or issues:
+- Create an issue on GitHub
+- Check the [LangGraph documentation](https://langchain-ai.github.io/langgraph/)
+- Review [Gmail API docs](https://developers.google.com/gmail/api)
+
+---

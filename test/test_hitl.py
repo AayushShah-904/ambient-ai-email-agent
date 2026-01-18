@@ -1,12 +1,12 @@
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# import sys
+# import os
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import uuid
 from typing import Dict, Any
 from langchain_core.messages import HumanMessage
 import time
-from src.graph import create_graph
-from src.hitl_handler import handle_hitl
+from backend.src.graph import create_graph
+from backend.src.hitl_handler import handle_hitl
 
 def test_hitl_full_cycle():
     """Test HITL with real LLM triage + ReAct loop until natural HITL trigger."""

@@ -7,8 +7,6 @@ __pycache__/
 *$py.class
 
 # --- Project Specific (State/Database) ---
-# If you are using SqliteSaver for LangGraph checkpoints
-*.sqlite
 *.db
 
 # --- Environment Secrets (CRITICAL) ---
@@ -29,7 +27,15 @@ logs/
 
 # --- Jupyter Notebooks ---
 .ipynb_checkpoints
+notebooks/*.ipynb_checkpoints/
 
 
-# Google API Credentials & Tokens
+# ----Gmail and Calendar API----
 credentials/
+*.json 
+
+
+# --- Packaging & Distribution --- 
+*.egg-info/
+dist/
+build/

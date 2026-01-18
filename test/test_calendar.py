@@ -1,20 +1,20 @@
-import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# import os
+# import sys
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import datetime
 from datetime import timedelta, timezone
 from dateutil import parser as dateparser
 import json
 
-from src.tools.tools import read_calendar_availability, extract_meeting_from_email
-from src.tools.calendar import (
+from backend.src.tools.tools import read_calendar_availability, extract_meeting_from_email
+from backend.src.tools.google_calendar import (
     get_calendar_service, 
     check_for_holiday, 
     is_slot_available, 
     create_calendar_event,
     generate_reply_llm 
 )
-from src.tools.gmail import send_reply  
+from backend.src.tools.google_gmail import send_reply  
 
 print('=== PRODUCTION CALENDAR + REPLY TEST ===')
 

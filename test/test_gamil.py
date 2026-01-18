@@ -1,8 +1,8 @@
-import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# import os
+# import sys
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tools.tools import fetch_emails,process_email,DANGEROUS_TOOLS,send_gmail_reply
+from backend.src.tools.tools import fetch_emails,process_email,DANGEROUS_TOOLS,send_gmail_reply
 
 
 print('=== GMAIL TESTS ===')

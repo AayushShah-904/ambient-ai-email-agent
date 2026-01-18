@@ -1,0 +1,100 @@
+ambient-email-agent/
+│
+├── .env                    # API keys (Gemini, LangSmith, etc.)
+├── requirements.txt        # Project dependencies
+├── README.md               # Documentation and milestones
+│
+├── src/                    # Main application source code
+│   ├── __init__.py
+│   ├── config.py           # LLM and environment configuration
+│   ├── state.py            # LangGraph State definitions
+│   ├── graph.py            # Workflow orchestration logic
+│   ├── node.py             # Triage and ReAct node implementations
+│   ├── hitl_handler.py     # Human-in-the-loop decision logic
+│   ├── tools/              # Tool integrations
+│   │   ├── gmail.py        # Gmail API interactions
+│   │   ├── calendar.py     # Calendar API interactions
+│   │   └── tools.py        # Mock and wrapper tools
+│   └── main.py             # Main entry point for the agent
+│
+├── data/                   # Dataset storage
+│   ├── test_emails.csv     # Triage evaluation data
+│   └── golden_set_emails.jsonl # Evaluation dataset
+│
+├── notebooks/              # Experimental Jupyter notebooks
+│   ├── 00_graph_compilation.ipynb
+│   ├── 01_triage_evaluation.ipynb
+│   ├── 02_react_agent.ipynb
+│   ├── 03_evaluation.ipynb
+│   └── 04_hitl_demo.ipynb
+│
+├── tests/                  # Verification and unit tests
+│   ├── test_node.py        # Logic testing for individual nodes
+│   ├── test_hitl.py        # End-to-end safety flow testing
+│   ├── test_hitl_force.py  # Mocked safety decision testing
+│   ├── test_gamil.py       # Gmail tool verification
+│   ├── test_calendar.py    # Calendar tool verification
+│   └── test_real.py        # Production API flow testing
+│
+└── deploy/                 # Deployment artifacts
+    ├── dockerfile          # Container definition
+    └── docker-compose.yml  # Orchestration script
+
+
+langgraph-email-assistant/
+│
+├── .env                    # API keys (Gemini, LangSmith, etc.)
+├── requirements.txt        # Project dependencies
+├── README.md               # Documentation and milestones
+│
+├── src/                    # Main application source code
+│   ├── __init__.py
+│   ├── config.py           # LLM and environment configuration
+│   ├── state.py            # LangGraph State definitions
+│   ├── graph.py            # Workflow orchestration logic 
+│   ├── nodes/              # Tool integrations
+│   │   ├──__init__.py
+│   │   ├── node.py         # Triage and ReAct node implementations
+│   ├── hitl_handler.py     # Human-in-the-loop decision logic
+│   ├── tools/              # Tool integrations
+│   │   ├──__init__.py
+│   │   ├── gmail.py        # Gmail API interactions
+│   │   ├── calendar.py     # Calendar API interactions
+│   │   └── tools.py        # Mock and wrapper tools
+│
+├── data/                   # Dataset storage
+│   ├── test_emails.csv     # Triage evaluation data
+│   └── golden_set_emails.jsonl # Evaluation dataset
+│
+├── notebooks/              # Experimental Jupyter notebooks
+│   ├── 00_graph_compilation.ipynb
+│   ├── 01_triage_evaluation.ipynb
+│   ├── 02_react_agent.ipynb
+│   ├── 03_evaluation.ipynb
+│   └── 04_hitl_demo.ipynb
+│
+├── tests/                  # Verification and unit tests
+│   ├── test_node.py        # Logic testing for individual nodes
+│   ├── test_hitl.py        # End-to-end safety flow testing
+│   ├── test_hitl_force.py  # Mocked safety decision testing
+│   ├── test_gamil.py       # Gmail tool verification
+│   ├── test_calendar.py    # Calendar tool verification
+│   └── test_real.py        # Production API flow testing
+│
+
+
+
+
+
+
+START → triage_node → check_route
+  ├── ignore → END
+  ├── notify-human → END
+  └── respond-act → react_model_node
+                    ↓ (tool_name?)
+                 react_route
+      ├─ hitl_checkpoint ← DANGEROUS (M3)
+      │     ↓ human: approve/deny/edit
+      └─ react_tools → react_model (ReAct loop)
+                    ↓ (final_reply?)
+               react_end → END

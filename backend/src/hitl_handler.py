@@ -1,7 +1,6 @@
-# src/hitl_handler.py
 from typing import Literal, Dict, Any
 from langchain_core.messages import HumanMessage
-from src.state import AgentState
+from backend.src.state import AgentState
 
 Decision = Literal["approve", "deny", "edit"]
 
