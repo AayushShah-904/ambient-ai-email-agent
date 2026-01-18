@@ -39,3 +39,5 @@ credentials/
 *.egg-info/
 dist/
 build/
+
+project_format.txt
