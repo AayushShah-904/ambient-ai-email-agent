@@ -18,7 +18,8 @@ This is the base for an ambient email agent that will later get HITL, memory, an
 
 ## 1. Project Structure
 
-<img width="727" height="523" alt="image" src="https://github.com/user-attachments/assets/20e14f5f-6854-4f8d-8617-830219fb4d16" />
+<img width="658" height="562" alt="image" src="https://github.com/user-attachments/assets/eebb8d91-f0e0-4a12-a6af-a27611c8a485" />
+
 
 
 ---
