@@ -1,4 +1,4 @@
-# Ambient Email Agent (Triage + ReAct Loop)
+# Ambient Email Agent
 
 This project is an **email assistant** built with **LangGraph + LLMs (Gemini / Hugging Face)**.
 
