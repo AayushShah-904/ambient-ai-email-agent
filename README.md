@@ -18,54 +18,7 @@ This is the base for an ambient email agent that will later get HITL, memory, an
 
 ## 1. Project Structure
 
-<img width="658" height="562" alt="image" src="https://github.com/user-attachments/assets/eebb8d91-f0e0-4a12-a6af-a27611c8a485" />
-langgraph-email-assistant/
-├── backend/
-│   └── src/
-│       ├── main.py
-│       ├── graph.py
-│       ├── config.py
-│       ├── state.py
-│       ├── hitl_handler.py
-│       ├── eval_runner.py
-│       ├── schemas.py
-│       ├── dependencies.py
-│       ├── nodes/
-│       │   └── node.py
-│       └── tools/
-│           ├── __init__.py
-│           ├── auth.py
-│           ├── google_gmail.py
-│           ├── google_calendar.py
-│           └── tools.py
-├── frontend/
-│   ├── app.py
-│   └── app_mock.py
-├── credentials/
-│   └── credentials.json
-├── data/
-│   └── test_emails.csv
-├── notebooks/
-│   ├── 01_triage_test.ipynb
-│   ├── 02_react_agent.ipynb
-│   └── 03_evaluation.ipynb
-├── test/
-│   ├── __init__.py
-│   ├── test_triage.py
-│   ├── test_calendar.py
-│   ├── test_calendar_send.py
-│   ├── test_gmail.py
-│   ├── test_hitl.py
-│   ├── test_hitl_force.py
-│   ├── test_node.py
-│   ├── test_real.py
-│   └── test_real_api.py
-├── .env
-├── .gitignore
-├── requirements.txt
-├── README.md
-└── PROJECT_GUIDE.md
-
+<img width="497" height="876" alt="image" src="https://github.com/user-attachments/assets/b76efffb-e0d8-4253-8f23-201d0b09b748" />
 
 ---
 
