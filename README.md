@@ -286,6 +286,7 @@ CREATE TABLE user_tokens (
 
 These are automatically created by `AsyncPostgresSaver.setup()` during app startup.
 
+
 ### 12.2 Configure Database
 
 1. Install PostgreSQL
@@ -300,6 +301,9 @@ createdb email_assistance_db
 ```
 DATABASE_URL=postgresql://username:password@localhost:5432/email_assistance_db
 ```
+### 12.3 Database MetaData
+
+<img width="746" height="748" alt="image" src="https://github.com/user-attachments/assets/9d85b804-0200-4b9d-9922-ef106e753321" />
 
 ---
 
