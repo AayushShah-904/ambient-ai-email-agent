@@ -387,37 +387,7 @@ LANGCHAIN_PROJECT=ambient-email-agent
 
 ---
 
-## 16. Project Architecture
-
-### 16.1 Directory Structure
-
-```
-langgraph-email-assistant/
-├── backend/
-│   └── src/
-│       ├── main.py              # FastAPI server
-│       ├── graph.py             # LangGraph workflow
-│       ├── nodes/               # Graph nodes
-│       ├── tools/               # Gmail/Calendar tools
-│       ├── config.py            # LLM configuration
-│       └── state.py             # Agent state definition
-├── frontend/
-│   ├── app.py                   # Streamlit UI
-│   └── app_mock.py              # Mock version (no Gmail)
-├── credentials/
-│   └── credentials.json         # OAuth credentials
-├── data/
-│   └── test_emails.csv          # Test dataset
-├── notebooks/
-│   ├── 01_triage_test.ipynb     # Triage evaluation
-│   ├── 02_react_agent.ipynb     # ReAct demo
-│   └── 03_evaluation.ipynb      # LangSmith evals
-├── test/                        # Unit tests
-├── .env                         # Environment variables
-└── requirements.txt             # Python dependencies
-```
-
-### 16.2 Technology Stack
+## 16 Technology Stack
 
 | Component | Technology |
 |-----------|-----------|
@@ -450,57 +420,7 @@ pytest test/ -v
 
 ---
 
-## 18. Deployment (Production)
-
-### 18.1 Prerequisites
-
-- PostgreSQL instance (e.g., AWS RDS, Google Cloud SQL)
-- Domain with HTTPS (required for OAuth in production)
-- Cloud hosting (e.g., AWS EC2, Google Cloud Run, Heroku)
-
-### 18.2 Update OAuth Redirect URIs
-
-In Google Cloud Console:
-- Add production redirect URI: `https://yourdomain.com/auth/callback`
-
-### 18.3 Deploy Backend
-
-```bash
-# Using Docker (recommended)
-docker build -t email-assistant-backend .
-docker run -p 8000:8000 --env-file .env email-assistant-backend
-
-# Or using Gunicorn
-gunicorn backend.src.main:app -w 4 -k uvicorn.workers.UvicornWorker
-```
-
-### 18.4 Deploy Frontend
-
-```bash
-# Update app.py backend URL to production
-streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
-```
-
----
-
-## 19. Troubleshooting
-
-### 19.1 Common Issues
-
-**Issue:** `WARNING:psycopg.pool:error connecting in 'pool-1'`
-- **Solution:** Check `DATABASE_URL` in `.env`, ensure PostgreSQL is running
-
-**Issue:** "Cannot connect to backend server"
-- **Solution:** Ensure FastAPI is running on port 8000: `uvicorn backend.src.main:app --port 8000`
-
-**Issue:** OAuth redirect fails
-- **Solution:** Verify redirect URI matches `credentials.json` exactly
-
-**Issue:** LLM suggests calendar for non-meeting emails
-- **Solution:** The agent now includes smart meeting detection (v1.2+)
-```
-
-## 20. Acknowledgments
+## 18. Acknowledgments
 
 - **LangChain & LangGraph** – For the agent framework
 - **Google Gemini** – For LLM capabilities
@@ -509,11 +429,3 @@ streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
 
 ---
 
-## 21. Support
-
-For questions or issues:
-- Create an issue on GitHub
-- Check the [LangGraph documentation](https://langchain-ai.github.io/langgraph/)
-- Review [Gmail API docs](https://developers.google.com/gmail/api)
-
----
