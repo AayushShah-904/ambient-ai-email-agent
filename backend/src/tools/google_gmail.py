@@ -1,8 +1,10 @@
 import os
 import sys
+import asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import base64
 from email.mime.text import MIMEText
+from email.utils import parseaddr
 from typing import Optional, Tuple
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -42,6 +44,28 @@ def get_clean_body(payload: dict) -> Optional[str]:
                     return base64.urlsafe_b64decode(data).decode('utf-8')
     return None
 
+def get_sender_display_name(full_msg: dict) -> str:
+    """
+    Extracts first name (e.g. 'Alice') from Gmail message's From header.
+    Falls back to 'Guest' if no name is present.
+    """
+    if 'payload' not in full_msg:
+        return "Guest"
+    
+    headers = full_msg['payload']['headers']
+    sender_header = next((h['value'] for h in headers if h['name'] == 'From'), None)
+    
+    if not sender_header:
+        return "Guest"
+    
+    name, _ = parseaddr(sender_header)
+    if not name:
+        return "Guest"
+    
+    # Use first token as first name
+    return name.split()[0]
+
+
 def get_sender_and_subject(full_msg: dict) -> Tuple[Optional[str], Optional[str]]:
     """Digs through Gmail's headers to find who sent it and what the subject line is"""
     headers = full_msg['payload']['headers']
@@ -49,17 +73,16 @@ def get_sender_and_subject(full_msg: dict) -> Tuple[Optional[str], Optional[str]
     subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
     return sender, subject
 
-
 async def send_reply(db: AsyncConnection, user_id: str, to_email: str, subject: str, message_text: str) -> bool:
     """
     Sends an email reply via Gmail API using run_in_executor to avoid blocking.
     Returns True if it worked, False if something went wrong.
     """
-    import asyncio
+    
     service = await get_gmail_service(db, user_id)
     try:
         loop = asyncio.get_running_loop()
-        message = MIMEText(message_text)
+        message = MIMEText(message_text,'html')
         message['to'] = to_email
         message['subject'] = subject
         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
@@ -77,7 +100,7 @@ async def send_reply(db: AsyncConnection, user_id: str, to_email: str, subject: 
 
 async def mark_as_processed(db: AsyncConnection, user_id: str, msg_id: str) -> bool:
     """Marks an email as read by removing the UNREAD label using run_in_executor."""
-    import asyncio
+    
     service = await get_gmail_service(db, user_id)
     try:
         loop = asyncio.get_running_loop()
@@ -98,7 +121,7 @@ async def apply_gmail_label(db: AsyncConnection, user_id: str, msg_id: str, labe
     If the label doesn't exist yet, we create it first.
     This is how we mark important emails for human review.
     """
-    import asyncio
+    
     service = await get_gmail_service(db, user_id)
     try:
         loop = asyncio.get_running_loop()
@@ -138,12 +161,13 @@ async def apply_gmail_label(db: AsyncConnection, user_id: str, msg_id: str, labe
         return False
     
 
-async def fetch_emails(db: AsyncConnection, user_id: str, query: str = 'in:inbox is:unread -category:social -category:promotions -category:updates -category:forums') -> list:
+async def fetch_emails(db: AsyncConnection, user_id: str, query: str = 'in:inbox is:unread -category:social -category:promotions') -> list:
     """
     Gets unread emails from the PRIMARY inbox only.
     We skip social media, promotions, and forum emails - just the important stuff.
+    #-category:updates -category:forums
     """
-    import asyncio
+    
     service = await get_gmail_service(db, user_id)
     
     loop = asyncio.get_running_loop()

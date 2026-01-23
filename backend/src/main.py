@@ -1,6 +1,9 @@
 import os
 import time
 import uuid
+import asyncio
+import re
+from bs4 import BeautifulSoup 
 import requests
 from typing import Optional, List, Literal
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -13,9 +16,10 @@ from psycopg_pool import AsyncConnectionPool
 from psycopg import AsyncConnection
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from backend.src.tools.google_gmail import fetch_emails,send_reply,mark_as_processed,get_sender_and_subject,apply_gmail_label
-from backend.src.tools.google_calendar import generate_meeting_response_llm,extract_event_details_llm,book_best_slot,generate_general_llm
-from backend.src.tools.auth import get_user_service, SCOPES
+
+from backend.src.tools.google_gmail import fetch_emails,send_reply,mark_as_processed,apply_gmail_label,get_gmail_service
+from backend.src.tools.google_calendar import generate_meeting_response_llm,extract_event_details_llm,book_best_slot,generate_general_llm,delete_calendar_event
+from backend.src.tools.auth import SCOPES
 from backend.src.graph import create_graph
 
 load_dotenv()
@@ -121,175 +125,181 @@ async def callback(code: str, request: Request, db=Depends(get_db)):
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:8501")
     return RedirectResponse(f"{frontend_url}/?user_id={user_id}")
 
+
+
+
+def strip_html_tags(html_text: str) -> str:
+    """Convert HTML to plain text for fallback."""
+    soup = BeautifulSoup(html_text, 'html.parser')
+    return soup.get_text()
+    
 @app.post("/v1/scan-and-draft")
 async def scan_and_draft(request: ScanRequest, db: AsyncConnection = Depends(get_db)):
-    """
-    This is the main email processing endpoint. It:
-    1. Fetches the latest unread email from Gmail
-    2. Asks the AI to classify it (ignore/notify/respond)
-    3. If it needs a response, generates a draft for human approval
-    """
-    # Create a unique thread ID so we can track this email's state in the database
-    thread_id = f"thread_{uuid.uuid4().hex[:12]}"
-    config = {"configurable": {"thread_id": thread_id}}
-    
     try:
-        draft = None
         emails = await fetch_emails(db, request.userid)
         if not emails:
             return {"status": "empty", "message": "No new emails."}
         
-        # Feed the email into the AI agent
-        initial_state = {
-            "mail": emails[0], 
-            "userid": request.userid,
-        }
-        
-        # Pass db through config, not state (AsyncConnection can't be serialized)
-        config["configurable"]["db"] = db
-        
-        await app.state.agent.ainvoke(initial_state, config=config)
-        
-        # Check what the AI decided to do
-        state = await app.state.agent.aget_state(config)
-        category = state.values.get("triage_category")
-        draft = None
-        
-        if category == "ignore":
-            # Spam or newsletter - just mark it read
-            # Action handled by 'ignore' node in graph
-            await mark_as_processed(db, request.userid, emails[0]['id'])
-            return {
-                "status": "completed",
-                "category": "ignore",
-                "message": "Email identified as spam/newsletter and marked as read.",
-                "subject": emails[0]['subject']
-            }
+        # Limit to the first 2 emails as requested
+        emails_to_process = emails[:1]
+        processed_results = []
 
-        if category == "notify-human":
-            # Important email that needs human attention - add a label
-            # Action handled by 'notify-human' node in graph
-            await apply_gmail_label(db, request.userid, emails[0]['id'],"AI_Notify")
-            return {
-                "status": "completed",
-                "category": "notify-human",
-                "message": "Important/urgent email detected! Labeled as 'AI-Notify' in your Gmail for your review.",
-                "subject": emails[0]['subject'],
-                "sender": emails[0]['sender']
-            }
-        
-        if category == "respond-act":
-            # 1. Attempt to extract meeting details
-            event_details = await extract_event_details_llm(emails[0]['body'], emails[0]['subject'])
+        for email in emails_to_process:
+            # Create a unique thread ID for each email
+            thread_id = f"thread_{uuid.uuid4().hex[:12]}"
+            config = {"configurable": {"thread_id": thread_id, "db": db}}
+            event_id = None
             
-            # 2. Check if a valid meeting request exists
-            if event_details and event_details.get('slots'):
-                # Attempt to book the slot based on your Vadodara schedule
-                success, slot,event_id, reasons = await book_best_slot(db,request.userid, event_details)
+            initial_state = {
+                "mail": email, 
+                "userid": request.userid,
+            }
+            
+            # 1. Run the AI Graph for this specific email
+            await app.state.agent.ainvoke(initial_state, config=config)
+            print(f"DEBUG: Email Subject: {email['subject']}")
+            # 2. Get the results for this email
+            state = await app.state.agent.aget_state(config)
+            category = state.values.get("triage_category")
+            draft = state.values.get("final_reply")
+
+            # 3. Handle Automation Categories (Ignore/Notify)
+            if category == "ignore":
+                await mark_as_processed(db, request.userid, email['id'])
+                processed_results.append({
+                    "thread_id": thread_id,
+                    "status": "completed",
+                    "category": "ignore",
+                    "subject": email['subject']
+                })
+                continue
+
+            if category == "notify-human":
+                await apply_gmail_label(db, request.userid, email['id'])
+                processed_results.append({
+                    "thread_id": thread_id,
+                    "status": "completed",
+                    "category": "notify-human",
+                    "subject": email['subject']
+                })
+                continue
+
+            # 4. Handle Respond-Act (Meeting Logic) - UPDATED
+            if category == "respond-act":
+                # 1. Fetch full message
+                service = await get_gmail_service(db, request.userid)
+                loop = asyncio.get_running_loop()
+                full_msg = await loop.run_in_executor(
+                    None,
+                    lambda: service.users().messages().get(
+                        userId='me', id=email['id'], format='full'
+                    ).execute()
+                )
                 
-                if success:
-                    # 🟢 Path: Successful Booking
+                # 2. Extract details
+                event_details = await extract_event_details_llm(email['body'], email['subject'])
+                
+                # 🟢 NEW: Check if slots actually exist and are not empty
+                # If the LLM returns no slots, it's not a meeting email!
+                has_valid_slots = event_details and event_details.get('slots') and len(event_details.get('slots')) > 0
+                
+                current_event_id = None
+                
+                if has_valid_slots:
+                    # Proceed with booking logic
+                    success, slot, event_id, reasons = await book_best_slot(db, request.userid, event_details)
+                    current_event_id = event_id if success else None
+                    
                     draft = await generate_meeting_response_llm(
-                        original_subject=emails[0]['subject'],
-                        original_body=emails[0]['body'],
+                        full_msg=full_msg,
                         event_details=event_details,
-                        booked_slot=slot,
-                        calendar_event_id=event_id
+                        booked_slot=slot if success else None,
+                        calendar_event_id=current_event_id,
+                        rejection_reasons=None if success else (reasons or ["No available slots"])
                     )
                 else:
+                    # 🟢 CORRECT FALLBACK: This email (like Infosys) is now treated as general
+                    draft = await generate_general_llm(full_msg)
+                # Update state with the final draft text
+                await app.state.agent.aupdate_state(config, {
+                    "final_reply": draft,
+                    "event_id": event_id, 
+                    "mail": email 
+                })
 
-                    draft = await generate_meeting_response_llm(
-                        original_subject=emails[0]['subject'],
-                        original_body=emails[0]['body'],
-                        event_details=event_details,
-                        rejection_reasons=reasons or ["No available slots found"]
-                    )
-            else:
-                # 🟡 Path: General Acknowledgement (No meeting found)
-                print("Simple email - Using general acknowledgement strategy")
-                draft = await generate_general_llm(
-                    original_subject=emails[0]['subject'],
-                    original_body=emails[0]['body']
-                )
+                processed_results.append({
+                    "thread_id": thread_id,
+                    "status": "waiting_for_approval",
+                    "category": category,
+                    "sender": email['sender'],
+                    "subject": email['subject'],
+                    "proposed_reply_html": draft,  
+                    "proposed_reply_plain": strip_html_tags(draft), 
+                    "event_id": event_id
+                })
 
-            # 3. Update the graph state so the draft is ready for the approve-action endpoint
-            await app.state.agent.aupdate_state(config, {"final_reply": draft})
 
-        response_data = {
-            "thread_id": thread_id,
-            "category": category,
-            "sender": emails[0]['sender'],
-            "subject": emails[0]['subject'],
-            "proposed_reply": draft,
-            "status": "waiting_for_approval" if category == "respond-act" else "completed"
-        }
-        return response_data
+        return {"status": "success", "results": processed_results}
     
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-    
-    
+
 @app.post("/v1/approve-action")
 async def approve_action(data: ApprovalActionRequest, db: AsyncConnection = Depends(get_db)):
     config = {"configurable": {"thread_id": data.thread_id}}
     
     try:
-        # 1. Capture the decision (Approve, Deny, or Edit)
-        state_update = {"hitl_decision": data.action}
+        # 1. Get the current state BEFORE resuming the graph
+        # This ensures we get the event_id that was saved during scan-and-draft
+        current_state = await app.state.agent.aget_state(config)
+        event_id = current_state.values.get("event_id")
+        email_data = current_state.values.get("mail")
         
-        # CONDITION: EDIT - Update draft with user's manual changes
+        # 2. Record the human decision
+        state_update = {"hitl_decision": data.action}
         if data.action == "edit" and data.edited_text:
             state_update["final_reply"] = data.edited_text
             
         await app.state.agent.aupdate_state(config, state_update)
         
-        # 2. Resume the Graph to move past the checkpoint
+        # 3. Resume the Graph
         config["configurable"]["db"] = db
         await app.state.agent.ainvoke(None, config=config)
         
-        # 3. Retrieve final state for execution
+        # 4. Handle the "Deny" Cleanup
+        if data.action.lower() == "deny":
+            if event_id:
+                await delete_calendar_event(db, data.user_id, event_id)
+                print(f"DEBUG: Successfully triggered deletion for {event_id}")
+            
+            await mark_as_processed(db, data.user_id, email_data['id'])
+            return {"status": "success", "message": "Event deleted and mail read."}
+
+        # 5. Handle Approve/Edit
+        # (Retrieve fresh values if ainvoke changed them, otherwise use existing)
         final_state = await app.state.agent.aget_state(config)
-        email_data = final_state.values.get("mail")
         reply_content = final_state.values.get("final_reply")
-
-        # --- EXECUTION OF CONDITIONS ---
-        original_subject = email_data.get('subject', 'No Subject')
-        if not original_subject.lower().startswith("re:"):
-            final_subject = f"Re: {original_subject}"
-        else:
-            final_subject = original_subject
-
-        # CONDITION: APPROVE or EDIT - Send the email
-        if data.action in ["approve", "edit"]:
-            # Handle Calendar booking if details exist
-            event_details = await extract_event_details_llm(email_data['body'], email_data['subject'])
-            if event_details and event_details.get('slots'):
-                await book_best_slot(db, data.user_id, event_details) #
-
-            await send_reply(
-                    db=db,
-                    user_id=data.user_id,    # Changed from userid to user_id
-                    to_email=email_data['sender'], # Changed from recipient to to_email
-                    subject=final_subject,
-                    message_text=reply_content # Changed from body to message_text
-                )
-
-        #CONDITION: ALL (Approve, Edit, and Deny) - Mark as read
-        # This fulfills your requirement to mark received mail as read in every case
-        await mark_as_processed(db, data.user_id, email_data['id']) #
-
-        # Return specific messages based on the action taken
-        messages = {
-            "approve": "Email sent and marked as read.",
-            "edit": "Edited email sent and marked as read.",
-            "deny": "Email ignored and marked as read."
-        }
         
-        return {"status": "success", "message": messages.get(data.action, "Processed.")}
+        if data.action in ["approve", "edit"]:
+            # Check for "Re:" prefix
+            original_subject = email_data.get('subject', 'No Subject')
+            final_subject = original_subject if original_subject.lower().startswith("re:") else f"Re: {original_subject}"
+            formatted_reply = reply_content.replace("\n", "<br>")
+            
+            await send_reply(
+                db=db,
+                user_id=data.user_id,
+                to_email=email_data['sender'],
+                subject=final_subject,
+                message_text=formatted_reply
+            )
+
+        await mark_as_processed(db, data.user_id, email_data['id'])
+        return {"status": "success", "message": "Process completed successfully."}
 
     except Exception as e:
         import traceback
-        traceback.print_exc() #
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

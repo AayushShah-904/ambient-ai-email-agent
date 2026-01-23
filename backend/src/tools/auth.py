@@ -89,7 +89,7 @@ async def get_user_tokens(db: AsyncConnection, user_id: str) -> Optional[Dict[st
             }
         return None
 
-async def get_user_service(db: AsyncConnection, user_id: str, service_name: str) -> Any:
+async def get_user_service(db: AsyncConnection, user_id: str, service_name: str,version: Optional[str] = None) -> Any:
     token_data = await get_user_tokens(db, user_id)
     if not token_data:
         raise ValueError(f"No tokens found for user {user_id}")
@@ -121,5 +121,11 @@ async def get_user_service(db: AsyncConnection, user_id: str, service_name: str)
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, creds.refresh, GoogleRequest())
     
-    version = 'v3' if service_name == 'calendar' else 'v1'
+    if not version:
+        if service_name == 'calendar':
+            version = 'v3'
+        elif service_name == 'gmail':
+            version = 'v1'
+        else:
+            version = 'v1'
     return build(service_name, version, credentials=creds)

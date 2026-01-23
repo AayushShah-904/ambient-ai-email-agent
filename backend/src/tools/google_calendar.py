@@ -2,6 +2,8 @@ import json
 import re
 import os
 import sys
+import asyncio
+from googleapiclient.errors import HttpError
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timedelta, timezone
 from dateutil import parser as date_parser
@@ -11,7 +13,7 @@ from googleapiclient.discovery import Resource
 from psycopg import AsyncConnection
 from backend.src.tools.auth import get_user_service
 from dotenv import load_dotenv
-
+from backend.src.tools.google_gmail import get_sender_display_name
 load_dotenv()
 IST = timezone(timedelta(hours=5, minutes=30))
 HOLIDAY_CALENDAR_ID = 'en.indian#holiday@group.v.calendar.google.com'
@@ -30,7 +32,6 @@ async def extract_event_details_llm(email_text: str, email_subject: str) -> Opti
         
         Context:
         - Current Date (IST): {current_time}
-        - Email Subject: "{email_subject}"
         - Email Body: "{email_text}"
         
         Task:
@@ -74,7 +75,7 @@ async def extract_event_details_llm(email_text: str, email_subject: str) -> Opti
 
 async def check_for_holiday(service: Resource, date_obj: datetime.date) -> Tuple[bool, Optional[str]]:
     """Check Indian holidays calendar."""
-    import asyncio
+    
     try:
         start_of_day = datetime.combine(date_obj, datetime.min.time()).replace(tzinfo=IST)
         end_of_day = datetime.combine(date_obj, datetime.max.time()).replace(tzinfo=IST)
@@ -101,7 +102,7 @@ async def check_for_holiday(service: Resource, date_obj: datetime.date) -> Tuple
 
 async def is_slot_available(service: Resource, start_dt: datetime, end_dt: datetime) -> Tuple[bool, Optional[str]]:
     """Check personal calendar availability."""
-    import asyncio
+    
     try:
         loop = asyncio.get_event_loop()
         events_result = await loop.run_in_executor(
@@ -125,7 +126,7 @@ async def is_slot_available(service: Resource, start_dt: datetime, end_dt: datet
 
 async def create_calendar_event(service: Resource, details: Dict, start_dt: datetime, end_dt: datetime) -> bool:
     """Create event in primary calendar."""
-    import asyncio
+    
     try:
         event_body = {
             'summary': details['summary'],
@@ -223,100 +224,32 @@ async def book_best_slot(db: AsyncConnection, userid: str, event_data: Dict) -> 
     # Returns exactly 4 values to match your main.py unpacking
     return booked_successfully, final_slot, final_event_id, rejection_reasons[:3]
 
+async def delete_calendar_event(db: AsyncConnection, user_id: str, event_id: str):
+    # Ensure 'calendar' service is retrieved correctly
+    calendar = await get_user_service(db, user_id, "calendar")
+    
+    # ADD THIS LOG TO SEE IF IT EVEN RUNS
+    print(f"🚀 ATTEMPTING DELETE: ID={event_id}")
 
-# async def generate_reply_llm(original_subject: str, original_body: str, 
-#                       event_details: Optional[Dict], 
-#                       booked_slot: Optional[Dict] = None,
-#                       rejection_reasons: Optional[List[str]] = None,
-#                       calendar_event_id: Optional[str] = None) -> str:
-#     """
-#     Production-grade replies: Confirm booking, reject smartly, suggest alternatives.
-#     """
-#     try:
-#         model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.8)
-        
-#         current_time = datetime.now(IST).strftime('%Y-%m-%d %A %I:%M %p IST')
-        
-#         if booked_slot and calendar_event_id:
-#             # 🟢 SUCCESS - Event Booked!
-#             prompt = f"""
-#             You successfully booked a meeting! Send CONFIRMATION.
+    def _delete_sync():
+        return calendar.events().delete(
+            calendarId='primary', 
+            eventId=event_id
+        ).execute() # 🟢 MUST HAVE .execute()
 
-#             📅 DETAILS:
-#             - Event: {event_details['summary']}
-#             - Date: {booked_slot['date_str']} ({date_parser.parse(booked_slot['time_str']).strftime('%I:%M %p')})
-#             - Location: {event_details.get('location', 'Online')}
-#             - Calendar ID: {calendar_event_id}
-
-#             📧 Original Request:
-#             Subject: "{original_subject}"
-#             Body: "{original_body[:200]}..."
-
-#             Task:
-#             Write SHORT, professional confirmation.
-#             Include EXACT time/location.
-#             Sign: "Aayush's AI Assistant"
-#             CC yourself if needed.
-
-#             Subject prefix: "Re: {original_subject[:30]} - CONFIRMED"
-#             """
-        
-#         elif rejection_reasons:
-#             # 🔴 REJECT - All slots failed
-#             prompt = f"""
-#             ALL proposed times failed. Send polite REJECTION + alternatives.
-
-#             ❌ Reasons:
-#             {json.dumps(rejection_reasons, indent=2)}
-
-#             📧 Original:
-#             Subject: "{original_subject}"
-#             Body: "{original_body[:200]}..."
-
-#             Task:
-#             1. Acknowledge request politely
-#             2. Explain SPECIFIC reasons (holiday/busy)
-#             3. Suggest alternatives (next week Tue/Fri 2PM)
-#             4. Ask sender to confirm new time
-#             5. Sign: "Aayush's AI Assistant"
-
-#             Subject: "Re: {original_subject[:30]} - Times unavailable"
-#             """
-            
-#         else:
-#             # 🟡 NO EVENT - Generic reply
-#             prompt = f"""
-#             No clear meeting request found. Send polite ACKNOWLEDGEMENT.
-
-#             📧 Original:
-#             Subject: "{original_subject}"
-
-#             Task:
-#             - Thank sender
-#             - Ask for specific date/time if needed
-#             - Offer availability (Tue/Wed/Fri 2-4PM)
-#             - Sign: "Aayush's AI Assistant"
-#             """
-        
-        
-#         response = await model.ainvoke(prompt)  # ✅ Changed from invoke to ainvoke
-#         reply = response.content.strip()
-        
-#         # Clean formatting
-#         reply = re.sub(r'^```.*?\n?', '', reply, flags=re.DOTALL)
-#         reply = re.sub(r'\n```.*?$', '', reply, flags=re.DOTALL)
-        
-#         return reply
-        
-#     except Exception as e:
-#         print(f"⚠️ Reply gen error: {e}")
-#         if booked_slot:
-#             return f"✅ {event_details['summary']} confirmed for {booked_slot['date_str']} {booked_slot['time_str']}."
-#         return "Thanks - processed your request!"
-
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _delete_sync)
+        print(f"🗑️ SUCCESS: Deleted {event_id}")
+        return True
+    except Exception as e:
+        print(f"❌ DELETE FAILED: {e}")
+        return False
+    
 async def generate_meeting_response_llm(
-    original_subject: str, 
-    original_body: str, 
+    # original_subject: str, 
+    # original_body: str, 
+    full_msg: dict,
     event_details: Dict, 
     booked_slot: Optional[Dict] = None,
     rejection_reasons: Optional[List[str]] = None,
@@ -325,26 +258,42 @@ async def generate_meeting_response_llm(
     """Handles Successful Booking Confirmations and Intelligent Rejections."""
     try:
         model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.8)
+
+        recipient_name = get_sender_display_name(full_msg)
         
         if booked_slot and calendar_event_id:
             # 🟢 SUCCESS - Event Booked!
             prompt = f"""
             You successfully booked a meeting! Send a professional CONFIRMATION.
-            DETAILS:
-            - Event: {event_details['summary']}
-            - Date: {booked_slot['date_str']}
-            - Time: {booked_slot['time_str']}
-            - Location: {event_details.get('location', 'Online')}
 
-            Subject prefix: "Re: {original_subject[:30]} - CONFIRMED"
+            Start with: Dear {recipient_name},
+
+            DETAILS:
+            Use simple HTML for formatting, with <b>...</b> for bold; do not output Markdown 
+
+            - <b>Event:<b> {event_details['summary']}
+            - <b>Date:<b> {booked_slot['date_str']}
+            - <b>Time:<b> {booked_slot['time_str']}
+            - <b>Location:<br> {event_details.get('location', 'Online')}
+
+            IMPORTANT: Do NOT include a "Subject:" line in your response. Write ONLY the email body.
+
+            Start directly with the greeting.
+
             Sign: "Aayush's AI Assistant"
             """
-        
         elif rejection_reasons:
             # 🔴 REJECT - Scheduling Conflicts
             prompt = f"""
             The proposed times failed. Send a polite REJECTION with alternatives.
-            REASONS: {json.dumps(rejection_reasons)}
+
+            Start with: Dear {recipient_name},
+
+            Use simple HTML for formatting, with <b>...</b> for bold; do not output Markdown 
+            <b>REASONS:<b> {json.dumps(rejection_reasons)}
+            IMPORTANT: Do NOT include a "Subject:" line in your response. Write ONLY the email body.
+
+            Start directly with the greeting.
 
             Task:
             1. Explain SPECIFIC reasons (e.g., busy or holiday).
@@ -357,22 +306,24 @@ async def generate_meeting_response_llm(
     except Exception as e:
         return "Processed your meeting request. Please check your calendar."
     
-async def generate_general_llm(original_subject: str, original_body: str) -> str:
+async def generate_general_llm(full_msg:dict) -> str:
     """Handles General Acknowledgements when no event is detected."""
     try:
+        
         model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
+
+        recipient_name = get_sender_display_name(full_msg)
         
         prompt = f"""
-        No clear meeting request found. Send a polite ACKNOWLEDGEMENT.
-        
-        EMAIL SUBJECT: "{original_subject}"
-        
+        You are Aayush's AI Assistant. Acknowledge this email professionally.
+        Start with: Dear {recipient_name},
+
         TASK:
-        - Thank the sender for their email.
-        - If they need a meeting, ask for a specific date/time.
-        - Briefly mention general availability: Tue/Wed/Fri 2:00 PM - 4:00 PM.
+        - If the email is a newsletter or general update (like Infosys feedback), thank them for the info.
+        - ONLY mention meeting availability if the original email seems to be inquiring about your time.
         - Sign: "Aayush's AI Assistant".
-        - Keep it to 1-2 sentences.
+
+        Keep it concise (1-2 sentences).
         """
         
         response = await model.ainvoke(prompt)

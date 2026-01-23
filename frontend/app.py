@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 import streamlit as st
 import requests
+
 load_dotenv()
 
 st.set_page_config(page_title="Email Assistant", layout="wide")
@@ -20,10 +21,7 @@ def get_user_id():
 user_id = get_user_id()
 
 def handle_action(thread_id, action, user_id, edited_text=None):
-    """
-    Sends the human's decision (approve/edit/deny) to the backend.
-    This is how users control whether AI-drafted emails actually get sent.
-    """
+    """Sends the human's decision (approve/edit/deny) to the backend."""
     try:
         payload = {
             "thread_id": thread_id,
@@ -74,95 +72,147 @@ if user_id:
             with st.spinner("Scanning inbox..."):
                 try:    
                     response = requests.post(
-                            "http://localhost:8000/v1/scan-and-draft",
+                        "http://localhost:8000/v1/scan-and-draft",
                         json={"userid": user_id},
                         timeout=150
                     )
                     if response.status_code == 200:
                         res_data = response.json()
-                        if res_data.get("status") == "completed":
-                            # Different UI feedback based on what the AI decided
-                            category = res_data.get("category", "")
-                            message = res_data.get("message", "Email processed")
+                        
+                        if res_data.get("status") == "empty":
+                            st.info("No new emails found in your inbox!")
+                        
+                        elif res_data.get("status") == "success":
+                            results = res_data.get("results", [])
                             
-                            if category == "ignore":
-                                st.success(f"**{message}**")
-                                if res_data.get("subject"):
-                                    st.caption(f"Subject: {res_data.get('subject')}")
+                            drafts_needing_approval = []
+                            auto_processed = []
                             
-                            elif category == "notify-human":
-                                st.warning(f"**{message}**")
-                                if res_data.get("subject"):
-                                    st.caption(f"Subject: {res_data.get('subject')}")
-                                if res_data.get("sender"):
-                                    st.caption(f"From: {res_data.get('sender')}")
+                            for result in results:
+                                if result.get("status") == "waiting_for_approval":
+                                    drafts_needing_approval.append(result)
+                                else:
+                                    auto_processed.append(result)
                             
-                            else:
-                                st.info(message)
+                            for item in auto_processed:
+                                category = item.get("category", "")
+                                subject = item.get("subject", "No subject")
+                                if category == "ignore":
+                                    st.success(f"**Email auto-archived:** {subject}")
+                                elif category == "notify-human":
+                                    st.warning(f"**Email flagged for your attention:** {subject}")
                             
+                            if drafts_needing_approval:
+                                st.session_state.draft_data = drafts_needing_approval
+                                st.session_state.current_draft_index = 0
+                            elif "draft_data" in st.session_state:
+                                del st.session_state.draft_data
+                        
+                        elif res_data.get("status") == "completed":
+                            st.info(res_data.get("message", "Email processed"))
                             if "draft_data" in st.session_state:
                                 del st.session_state.draft_data
                         
-                        elif res_data.get("status") == "empty":
-                            st.info("No new emails found in your inbox!")
-                        
-                        else:
-                            st.session_state.draft_data = res_data
-                except requests.ConnectionError:
-                    st.error("Cannot connect to backend. Is the FastAPI server running on port 8000?")
-                except requests.Timeout:
-                    st.error("Request timed out. The email processing took too long. Try again.")
-                except requests.HTTPError as e:
-                    st.error(f"Server error: {e.response.status_code}")
                 except Exception as e:
                     st.error(f"Unexpected error: {str(e)}")
     
-    # This column only shows up when there's a draft to review
+    # Review Logic Column
     if "draft_data" in st.session_state:
         with col2:
-            data = st.session_state.draft_data
+            drafts = st.session_state.draft_data
+            current_index = st.session_state.get("current_draft_index", 0)
+            
+            # Safe boundary check
+            if current_index >= len(drafts):
+                current_index = 0
+                st.session_state.current_draft_index = 0
+            
+            if len(drafts) > 1:
+                st.info(f"📧 **Email {current_index + 1} of {len(drafts)}** - Review and approve each email")
+            
+            # 🟢 Retrieve data for the specific current email
+            data = drafts[current_index]
             thread_id = data.get("thread_id")
             category = data.get("category", "unknown")
+            subject = data.get("subject", "N/A")
             
             st.markdown(f"**Category:** `{category.upper()}`")
             st.subheader(f"Draft for: **{data.get('sender', 'Unknown')}**")
-            st.write(f"**Subject:** {data.get('subject', 'N/A')}")
+            st.write(f"**Subject:** {subject}")
             
-            # User can edit the AI's draft before sending
-            reply_text = st.text_area("Review/Edit AI Draft:", data.get('proposed_reply', ''), height=250)
+            # 🟢 Use thread_id as the key to prevent widget state flickering
+            reply_text = st.text_area(
+                "Review/Edit AI Draft:", 
+                data.get('proposed_reply_plain', 'No draft generated.'), 
+                height=250, 
+                key=f"draft_text_{thread_id}"
+            )
             
             btn_col1, btn_col2, btn_col3 = st.columns(3)
             
             with btn_col1:
-                if st.button("Approve", use_container_width=True):
+                if st.button("✅ Approve", use_container_width=True, key=f"approve_{thread_id}"):
                     res = handle_action(thread_id, "approve", user_id=user_id)
                     if res and res.status_code == 200:
-                        response_data = res.json()
-                        # We store the message before rerunning so it survives the page refresh
-                        st.session_state.action_message = ("success", response_data.get("message", "Reply sent successfully!"))
-                        del st.session_state.draft_data
+                        st.session_state.action_message = ("success", "Reply sent successfully!")
+                        drafts.pop(current_index)
+                        # 🟢 Recalculate robust index
+                        if not drafts:
+                            st.session_state.pop("draft_data", None)
+                            st.session_state.pop("current_draft_index", None)
+                        else:
+                            st.session_state.current_draft_index = max(0, min(current_index, len(drafts) - 1))
                         st.rerun()
 
             with btn_col2:
-                if st.button("Edit & Send", use_container_width=True):
+                if st.button("✏️ Edit & Send", use_container_width=True, key=f"edit_{thread_id}"):
                     res = handle_action(thread_id, "edit", user_id=user_id, edited_text=reply_text)
                     if res and res.status_code == 200:
-                        response_data = res.json()
-                        st.session_state.action_message = ("success", response_data.get("message", "Edited reply sent successfully!"))
-                        del st.session_state.draft_data
+                        st.session_state.action_message = ("success", "Edited reply sent successfully!")
+                        drafts.pop(current_index)
+                        if not drafts:
+                            st.session_state.pop("draft_data", None)
+                            st.session_state.pop("current_draft_index", None)
+                        else:
+                            st.session_state.current_draft_index = max(0, min(current_index, len(drafts) - 1))
                         st.rerun()
 
             with btn_col3:
-                if st.button("Deny / Ignore", use_container_width=True):
+                # 🟢 Clean Deny Logic: Triggers calendar deletion in backend
+                if st.button("❌ Deny / Ignore", use_container_width=True, key=f"deny_{thread_id}"):
                     res = handle_action(thread_id, "deny", user_id=user_id)
                     if res and res.status_code == 200:
                         response_data = res.json()
-                        st.session_state.action_message = ("info", response_data.get("message", "Email marked as read (no reply sent)"))
-                        del st.session_state.draft_data
+                        st.session_state.action_message = ("info", response_data.get("message", "Email marked as read"))
+                        st.toast(f"Event for '{subject}' was removed from calendar.", icon="🗑️")
+                        
+                        drafts.pop(current_index)
+                        if not drafts:
+                            st.session_state.pop("draft_data", None)
+                            st.session_state.pop("current_draft_index", None)
+                        else:
+                            # 🟢 Adjust index to prevent overflow
+                            st.session_state.current_draft_index = max(0, min(current_index, len(drafts) - 1))
                         st.rerun()
+            
+            # Navigation controls
+            if len(drafts) > 1:
+                st.divider()
+                nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+                with nav_col1:
+                    if current_index > 0:
+                        if st.button("⬅️ Previous", use_container_width=True):
+                            st.session_state.current_draft_index = current_index - 1
+                            st.rerun()
+                with nav_col2:
+                    st.markdown(f"<div style='text-align: center; padding: 10px;'>Reviewing Draft {current_index + 1} of {len(drafts)}</div>", unsafe_allow_html=True)
+                with nav_col3:
+                    if current_index < len(drafts) - 1:
+                        if st.button("Next ➡️", use_container_width=True):
+                            st.session_state.current_draft_index = current_index + 1
+                            st.rerun()
 
 else:
-    # User isn't logged in yet - show them the login button
     st.info("Click below to login")
     st.markdown("""
         <div style="text-align: center; padding: 2rem;">
