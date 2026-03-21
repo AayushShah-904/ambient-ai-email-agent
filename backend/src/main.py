@@ -16,7 +16,8 @@ from psycopg_pool import AsyncConnectionPool
 from psycopg import AsyncConnection
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-
+        
+from backend.src.db_init import init_db
 from backend.src.tools.google_gmail import fetch_emails,send_reply,mark_as_processed,apply_gmail_label,get_gmail_service
 from backend.src.tools.google_calendar import generate_meeting_response_llm,extract_event_details_llm,book_best_slot,generate_general_llm,delete_calendar_event
 from backend.src.tools.auth import SCOPES
@@ -24,8 +25,12 @@ from backend.src.graph import create_graph
 
 load_dotenv()
 
+# # Allow OAuth to proceed even if Google reduces the granted scopes
+# os.environ["OAUTHLIB_RELAX_TOKEN_SCOPES"] = "1"
+
 DB_URI = os.getenv("DATABASE_URL")
-CLIENT_SECRETS_FILE = "credentials/credentials.json"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+CLIENT_SECRETS_FILE = os.path.join(PROJECT_ROOT, "credentials", "credentials.json")
 
 class ScanRequest(BaseModel):
     """Request format for scanning user's inbox"""
@@ -62,6 +67,9 @@ async def lifespan(app: FastAPI):
     This runs once at startup and cleans up automatically on shutdown.
     """
     async with AsyncConnectionPool(conninfo=DB_URI, max_size=20) as pool:
+
+        await init_db(pool)
+
         checkpointer = AsyncPostgresSaver(pool)
         await checkpointer.setup() 
         
