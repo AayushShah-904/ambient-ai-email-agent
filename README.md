@@ -169,10 +169,35 @@ pip install -r requirements.txt
 
 Create `.env` with your keys:
 
+```env
 GOOGLE_API_KEY=your_gemini_key
-HUGGINGFACEHUB_API_TOKEN=your_hf_token # optional
+GOOGLE_CLIENT_ID=your_google_client_id_here
+GOOGLE_CLIENT_SECRET=your_google_client_secret_here
+```
 
-### 8.2 Run from terminal
+### 8.2 Getting Google OAuth Credentials
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select an existing one)
+3. Navigate to **APIs & Services → Library** and enable:
+   - Gmail API
+   - Google Calendar API
+   - Google People API
+4. Go to **APIs & Services → Credentials**
+5. Click **"Create Credentials" → "OAuth client ID"**
+6. Select Application type: **Web application**
+7. Under **Authorized redirect URIs**, add:
+   ```
+   http://localhost:8000/auth/callback
+   ```
+8. Click **Create** — you'll see your **Client ID** and **Client Secret**
+9. Copy these values into your `.env` file as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
+10. Also download the credentials JSON and place it at `credentials/credentials.json`
+
+> [!NOTE]
+> If your app is in "Testing" mode in Google Cloud, only test users you explicitly add under **OAuth consent screen → Test users** will be able to log in.
+
+### 8.3 Run from terminal
 
 
 You should see:
@@ -180,7 +205,7 @@ You should see:
 - The triage result.  
 - For `respond-act`, logs from the ReAct loop and the final drafted reply.
 
-### 8.3 Run notebooks
+### 8.4 Run notebooks
 
 jupyter lab notebooks/
 
@@ -372,7 +397,10 @@ Required variables:
 ```env
 # LLM API Keys
 GOOGLE_API_KEY=your_gemini_api_key_here
-HUGGINGFACEHUB_API_TOKEN=your_hf_token_here  # optional
+
+# Google OAuth
+GOOGLE_CLIENT_ID=your_google_client_id_here
+GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 
 # Database
 DATABASE_URL=postgresql://user:password@localhost:5432/email_assistance_db
