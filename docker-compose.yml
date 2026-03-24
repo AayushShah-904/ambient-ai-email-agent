@@ -1,0 +1,58 @@
+services:
+  # ── PostgreSQL Database ──────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-email_assistance_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ──────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      target: backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-email_assistance_db}
+      BACKEND_URL: http://localhost:8000
+      FRONTEND_URL: http://localhost:8501
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./credentials:/app/credentials:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── Streamlit Frontend ───────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      target: frontend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Frontend talks to backend over Docker's internal network
+      BACKEND_URL: http://backend:8000
+      # Browser-facing URL for OAuth login (must be accessible from host browser)
+      PUBLIC_BACKEND_URL: http://localhost:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

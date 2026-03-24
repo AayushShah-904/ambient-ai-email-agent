@@ -197,7 +197,22 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 > [!NOTE]
 > If your app is in "Testing" mode in Google Cloud, only test users you explicitly add under **OAuth consent screen → Test users** will be able to log in.
 
-### 8.3 Run from terminal
+### 8.3 Run with Docker (Recommended)
+
+The simplest and most reliable way to run the entire system (Database, Backend, and Frontend) is using Docker.
+
+```bash
+docker compose up --build -d
+```
+- **Frontend UI**: http://localhost:8501
+- **Backend API**: http://localhost:8000
+
+To stop the containers:
+```bash
+docker compose down
+```
+
+### 8.4 Run natively from terminal
 
 
 You should see:
@@ -205,14 +220,6 @@ You should see:
 - The triage result.  
 - For `respond-act`, logs from the ReAct loop and the final drafted reply.
 
-### 8.4 Run notebooks
-
-jupyter lab notebooks/
-
-- Open `01_triage_test.ipynb` to test triage accuracy.  
-- Open `02_react_agent.ipynb` to inspect and demo the ReAct behavior.
-
----
 
 ## 9. Backend API (FastAPI)
 
@@ -447,7 +454,27 @@ pytest test/ -v
 
 ---
 
-## 18. Acknowledgments
+## 18. Run with Docker Compose
+
+The easiest way to run the full stack (PostgreSQL + Backend + Frontend) is via Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Once the containers are running, open the app in your browser:
+
+| Service | URL |
+|---------|-----|
+| **Frontend (Streamlit)** | [http://localhost:8501](http://localhost:8501) |
+| **Backend (FastAPI)** | [http://localhost:8000](http://localhost:8000) |
+
+> [!IMPORTANT]
+> Always use `localhost` (not `0.0.0.0`) in your browser. The `0.0.0.0` bind address shown in container logs is an internal listen address and won't work as a URL on Windows.
+
+---
+
+## 19. Acknowledgments
 
 - **LangChain & LangGraph** – For the agent framework
 - **Google Gemini** – For LLM capabilities

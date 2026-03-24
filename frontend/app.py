@@ -5,6 +5,10 @@ import requests
 
 load_dotenv()
 
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+# Browser-facing URL for OAuth login redirects (must be accessible from the user's browser)
+PUBLIC_BACKEND_URL = os.getenv("PUBLIC_BACKEND_URL", "http://localhost:8000")
+
 st.set_page_config(page_title="Email Assistant", layout="wide")
 
 st.title("Email Assistant")
@@ -30,7 +34,7 @@ def handle_action(thread_id, action, user_id, edited_text=None):
             "edited_text": edited_text
         }
         response = requests.post(
-            "http://localhost:8000/v1/approve-action", 
+            f"{BACKEND_URL}/v1/approve-action", 
             json=payload,
             timeout=30
         )
@@ -72,7 +76,7 @@ if user_id:
             with st.spinner("Scanning inbox..."):
                 try:    
                     response = requests.post(
-                        "http://localhost:8000/v1/scan-and-draft",
+                        f"{BACKEND_URL}/v1/scan-and-draft",
                         json={"userid": user_id},
                         timeout=150
                     )
@@ -214,9 +218,10 @@ if user_id:
 
 else:
     st.info("Click below to login")
-    st.markdown("""
+    login_url = f"{PUBLIC_BACKEND_URL}/auth/login"
+    st.markdown(f"""
         <div style="text-align: center; padding: 2rem;">
-            <a href="http://localhost:8000/auth/login" target="_self">
+            <a href="{login_url}" target="_self">
                 <button style="
                     width: 100%; height: 60px; font-size: 20px; 
                     background: #4285f4; color: white; border: none; 

@@ -1,0 +1,17 @@
+.venv/
+venv/
+.git/
+.gitignore
+__pycache__/
+*.py[cod]
+*.egg-info/
+notebooks/
+.env
+.env.*
+*.db
+.vscode/
+.idea/
+.DS_Store
+dist/
+build/
+project_format.txt

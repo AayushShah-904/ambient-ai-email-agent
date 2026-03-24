@@ -76,6 +76,19 @@ Finally, see it in action without breaking anything.
 
 For detailed dependency installation, refer to `README.md`. Here is the cheatsheet for getting it running daily:
 
+### Option A: Using Docker (Recommended)
+
+Simply run everything together using Docker Compose:
+
+```bash
+docker compose up --build
+```
+- **Frontend** will be available at `http://localhost:8501`
+- **Backend API** will be available at `http://localhost:8000`
+- **Database** will run on port `5432`
+
+### Option B: Running Natively
+
 **1. Start the Brain (Backend)**
 ```bash
 cd backend
