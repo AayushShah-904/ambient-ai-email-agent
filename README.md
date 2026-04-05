@@ -273,19 +273,6 @@ Explore the sandbox notebooks for experimentation without running the full serve
 | Docker | — | Containerization |
 
 ---
-
-## 🗺️ Project Roadmap
-
-- [x] **Milestone 1** — Core triage node and LangGraph workflow skeleton
-- [x] **Milestone 2** — ReAct loop with Gmail and Calendar tool integration
-- [x] **Milestone 3** — Human-in-the-loop approval checkpoint + Streamlit UI
-- [x] **Milestone 4** — PostgreSQL-backed persistent checkpointing
-- [x] **Milestone 5** — Evaluation pipeline with LLM-as-a-judge scoring
-- [ ] **Milestone 6** — Persistent user preference memory (FAISS + feedback loop)
-- [ ] **Milestone 7** — Background ambient scanning (scheduled / webhook-triggered)
-
----
-
 ## 🤝 Contributing
 
 1. **Fork** the repository
