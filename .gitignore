@@ -13,7 +13,9 @@ __pycache__/
 .env
 .env.local
 .env.*
+!.env.example
 secrets.json
+.streamlit/secrets.toml
 
 # --- VS Code / IDE Settings ---
 .vscode/

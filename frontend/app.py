@@ -5,9 +5,17 @@ import requests
 
 load_dotenv()
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+# Support both local .env and Streamlit Community Cloud secrets
+def _get_secret(key: str, default: str) -> str:
+    """Read from Streamlit secrets first (cloud), then env vars (local)."""
+    try:
+        return st.secrets[key]
+    except (KeyError, FileNotFoundError):
+        return os.getenv(key, default)
+
+BACKEND_URL = _get_secret("BACKEND_URL", "http://localhost:8000")
 # Browser-facing URL for OAuth login redirects (must be accessible from the user's browser)
-PUBLIC_BACKEND_URL = os.getenv("PUBLIC_BACKEND_URL", "http://localhost:8000")
+PUBLIC_BACKEND_URL = _get_secret("PUBLIC_BACKEND_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="Email Assistant", layout="wide")
 

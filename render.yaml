@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: ambient-ai-email-agent-backend
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt && pip install -e .
+    startCommand: uvicorn backend.src.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /docs
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false          # You will paste this in the Render dashboard
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false          # Paste your Neon connection string here
+      - key: BACKEND_URL
+        sync: false          # e.g. https://ambient-ai-email-agent-backend.onrender.com
+      - key: FRONTEND_URL
+        sync: false          # e.g. https://your-app.streamlit.app
+      - key: LANGCHAIN_TRACING_V2
+        value: "false"
+      - key: LANGCHAIN_API_KEY
+        sync: false          # Optional — only if you use LangSmith
+      - key: LANGCHAIN_PROJECT
+        value: ambient-email-agent
