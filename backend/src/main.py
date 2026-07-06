@@ -15,22 +15,24 @@ from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 from psycopg import AsyncConnection
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from fastapi.middleware.cors import CORSMiddleware
 
         
 from backend.src.db_init import init_db
 from backend.src.tools.google_gmail import fetch_emails,send_reply,mark_as_processed,apply_gmail_label,get_gmail_service
 from backend.src.tools.google_calendar import generate_meeting_response_llm,extract_event_details_llm,book_best_slot,generate_general_llm,delete_calendar_event
-from backend.src.tools.auth import SCOPES
+from backend.src.tools.auth import SCOPES, get_google_client_config
 from backend.src.graph import create_graph
 
 load_dotenv()
 
-# # Allow OAuth to proceed even if Google reduces the granted scopes
-# os.environ["OAUTHLIB_RELAX_TOKEN_SCOPES"] = "1"
+# Allow OAuth to proceed over HTTP (local development) and relaxed scopes
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPES"] = "1"
 
 DB_URI = os.getenv("DATABASE_URL")
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CLIENT_SECRETS_FILE = os.path.join(PROJECT_ROOT, "credentials", "credentials.json")
+if DB_URI and DB_URI.startswith("postgres://"):
+    DB_URI = DB_URI.replace("postgres://", "postgresql://", 1)
 
 class ScanRequest(BaseModel):
     """Request format for scanning user's inbox"""
@@ -66,12 +68,15 @@ async def lifespan(app: FastAPI):
     Sets up the database pool and LangGraph agent when the app starts.
     This runs once at startup and cleans up automatically on shutdown.
     """
-    async with AsyncConnectionPool(conninfo=DB_URI, max_size=20) as pool:
+    # 1. Run migrations/setup with dedicated conn string manager (autocommit-safe)
+    async with AsyncPostgresSaver.from_conn_string(DB_URI) as setup_checkpointer:
+        await setup_checkpointer.setup()
 
+    # 2. Run the main pool for endpoint queries
+    async with AsyncConnectionPool(conninfo=DB_URI, max_size=20) as pool:
         await init_db(pool)
 
         checkpointer = AsyncPostgresSaver(pool)
-        await checkpointer.setup() 
         
         # Make pool and agent available to all endpoints
         app.state.db_pool = pool 
@@ -81,6 +86,15 @@ async def lifespan(app: FastAPI):
         yield
 
 app = FastAPI(title="Ambient Email Agent", lifespan=lifespan)
+
+# Add CORS middleware to allow the Streamlit frontend to communicate with the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 async def get_db(request: Request):
     """Every API request gets its own database connection from the pool"""
@@ -92,7 +106,7 @@ async def get_db(request: Request):
 async def login():
     """Redirects user to Google's OAuth consent screen"""
     from google_auth_oauthlib.flow import Flow
-    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES)
+    flow = Flow.from_client_config(get_google_client_config(), scopes=SCOPES)
     flow.redirect_uri = os.getenv("BACKEND_URL", "http://localhost:8000") + "/auth/callback"
     auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
     return RedirectResponse(auth_url)
@@ -104,18 +118,25 @@ async def callback(code: str, request: Request, db=Depends(get_db)):
     We exchange the auth code for tokens and save them to the database.
     """
     from google_auth_oauthlib.flow import Flow
-    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES)
+    flow = Flow.from_client_config(get_google_client_config(), scopes=SCOPES)
     flow.redirect_uri = os.getenv("BACKEND_URL", "http://localhost:8000") + "/auth/callback"
     flow.fetch_token(code=code)
     
     creds = flow.credentials
-    user_info = requests.get(
+    user_info_resp = requests.get(
         "https://www.googleapis.com/oauth2/v3/userinfo",
         headers={"Authorization": f"Bearer {creds.token}"}
-    ).json()
+    )
+    if not user_info_resp.ok:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch user info: {user_info_resp.text}")
+    
+    user_info = user_info_resp.json()
+    email = user_info.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email address not returned by Google. Ensure scopes include email.")
     
     # Use the part before @ as the user's identifier
-    user_id = user_info.get("email").split('@')[0]
+    user_id = email.split('@')[0]
     
     # Save or update user's tokens in the database
     await db.execute(

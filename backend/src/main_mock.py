@@ -25,24 +25,28 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from backend.src.tools.auth import get_user_service
 from dotenv import load_dotenv
-from backend.src.tools.auth import SCOPES
+from backend.src.tools.auth import SCOPES, get_google_client_config
 from backend.src.graph import create_graph
 from backend.src.state import AgentState
 
 
 load_dotenv()
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPES"] = "1"
 # Configuration
 DB_URI = os.getenv("DATABASE_URL")
-CLIENT_SECRETS_FILE = "credentials/credentials.json"
 
 # --- APP LIFESPAN ---
 # In main.py
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. Run migrations/setup with dedicated conn string manager (autocommit-safe)
+    async with AsyncPostgresSaver.from_conn_string(DB_URI) as setup_checkpointer:
+        await setup_checkpointer.setup()
+
+    # 2. Run the main pool for endpoint queries
     async with AsyncConnectionPool(conninfo=DB_URI, max_size=20) as pool:
-        # 1. Setup the persistent saver
         saver = AsyncPostgresSaver(pool)
-        await saver.setup() # Creates the 'checkpoints' tables automatically
         
         # 2. Compile the graph with the saver
         app.state.agent = create_graph(checkpointer=saver)
@@ -63,14 +67,14 @@ async def get_db(request: Request):
 # --- AUTH ENDPOINTS ---
 @app.get("/auth/login")
 async def login():
-    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES)
+    flow = Flow.from_client_config(get_google_client_config(), scopes=SCOPES)
     flow.redirect_uri = "http://localhost:8000/auth/callback"
     auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
     return RedirectResponse(auth_url)
 
 @app.get("/auth/callback")
 async def callback(code: str, request: Request, db=Depends(get_db)):  # ✅ Fixed order
-    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES)
+    flow = Flow.from_client_config(get_google_client_config(), scopes=SCOPES)
     flow.redirect_uri = "http://localhost:8000/auth/callback"
     flow.fetch_token(code=code)
     
@@ -80,8 +84,14 @@ async def callback(code: str, request: Request, db=Depends(get_db)):  # ✅ Fixe
         "https://www.googleapis.com/oauth2/v3/userinfo",
         headers={"Authorization": f"Bearer {creds.token}"}
     )
+    if not user_info_response.ok:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch user info: {user_info_response.text}")
+    
     user_info = user_info_response.json()
     full_email = user_info.get("email") 
+    if not full_email:
+        raise HTTPException(status_code=400, detail="Email address not returned by Google. Ensure scopes include email.")
+        
     user_id = full_email.split('@')[0]
 
     print(f"✅ Saving tokens for user: {user_id}")

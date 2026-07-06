@@ -19,8 +19,6 @@ from backend.src.tools.auth import get_user_service
 load_dotenv()
 
 SCOPES = ['https://mail.google.com/', 'https://www.googleapis.com/auth/calendar']
-CREDENTIALS_FILE = 'credentials/credentials.json'
-TOKEN_FILE = 'credentials/token.json'
 
 async def get_gmail_service(db: AsyncConnection, user_id: str) -> Resource:
     """Gets authenticated Gmail service for a specific user"""

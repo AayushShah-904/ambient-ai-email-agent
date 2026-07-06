@@ -57,10 +57,24 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from psycopg import AsyncConnection
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-project_root = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
-CREDENTIALS_FILE = os.path.join(project_root, "credentials", "credentials.json")
-TOKEN_FILE = os.path.join(project_root, 'credentials', 'token.json')
+
+def get_google_client_config() -> dict:
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise ValueError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in environment variables.")
+    return {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris": [
+                os.getenv("BACKEND_URL", "http://localhost:8000") + "/auth/callback"
+            ]
+        }
+    }
 
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
