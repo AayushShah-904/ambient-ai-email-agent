@@ -3,6 +3,9 @@ from dotenv import load_dotenv
 import streamlit as st
 import requests
 
+# This must be the very first Streamlit command executed!
+st.set_page_config(page_title="Email Assistant", layout="wide")
+
 load_dotenv()
 
 # Support both local .env and Streamlit Community Cloud secrets
@@ -16,8 +19,6 @@ def _get_secret(key: str, default: str) -> str:
 BACKEND_URL = _get_secret("BACKEND_URL", "http://localhost:8000")
 # Browser-facing URL for OAuth login redirects (must be accessible from the user's browser)
 PUBLIC_BACKEND_URL = _get_secret("PUBLIC_BACKEND_URL", "http://localhost:8000")
-
-st.set_page_config(page_title="Email Assistant", layout="wide")
 
 st.title("Email Assistant")
 
