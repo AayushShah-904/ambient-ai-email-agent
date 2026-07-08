@@ -3,35 +3,26 @@ from dotenv import load_dotenv
 import streamlit as st
 import requests
 
-# This must be the very first Streamlit command executed!
+# MUST be the very first Streamlit command
 st.set_page_config(page_title="Email Assistant", layout="wide")
 
 load_dotenv()
 
-import pathlib
-
 # Support both local .env and Streamlit Community Cloud secrets
 def _get_secret(key: str, default: str) -> str:
-    """Read from env vars (local) first, then Streamlit secrets (cloud)."""
-    val = os.getenv(key)
-    if val is not None:
-        return val
-        
-    # Only fall back to st.secrets if running on Streamlit Cloud or if the secrets file exists on disk
-    is_cloud = os.getenv("STREAMLIT_SHARING_MODE") is not None
-    local_secrets = pathlib.Path(".streamlit/secrets.toml")
-    global_secrets = pathlib.Path.home() / ".streamlit" / "secrets.toml"
-    
-    if is_cloud or local_secrets.exists() or global_secrets.exists():
-        try:
-            return st.secrets[key]
-        except Exception:
-            pass
-    return default
+    """Read from Streamlit secrets first (cloud), then env vars (local)."""
+    try:
+        val = st.secrets.get(key)
+        if val is not None:
+            return val
+    except Exception:
+        pass
+    return os.getenv(key, default)
 
 BACKEND_URL = _get_secret("BACKEND_URL", "http://localhost:8000")
 # Browser-facing URL for OAuth login redirects (must be accessible from the user's browser)
 PUBLIC_BACKEND_URL = _get_secret("PUBLIC_BACKEND_URL", "http://localhost:8000")
+
 
 st.title("Email Assistant")
 
