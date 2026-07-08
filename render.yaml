@@ -26,3 +26,5 @@ services:
         sync: false          # Optional — only if you use LangSmith
       - key: LANGCHAIN_PROJECT
         value: ambient-email-agent
+      - key: PYTHON_VERSION
+        value: 3.11.9
