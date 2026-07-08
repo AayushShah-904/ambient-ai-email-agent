@@ -31,8 +31,11 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 os.environ["OAUTHLIB_RELAX_TOKEN_SCOPES"] = "1"
 
 DB_URI = os.getenv("DATABASE_URL")
-if DB_URI and DB_URI.startswith("postgres://"):
+if not DB_URI:
+    raise ValueError("DATABASE_URL environment variable is not set in the environment.")
+if DB_URI.startswith("postgres://"):
     DB_URI = DB_URI.replace("postgres://", "postgresql://", 1)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 class ScanRequest(BaseModel):
     """Request format for scanning user's inbox"""
