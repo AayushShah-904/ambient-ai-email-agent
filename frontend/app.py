@@ -234,14 +234,22 @@ else:
     login_url = f"{PUBLIC_BACKEND_URL}/auth/login"
     st.markdown(f"""
         <div style="text-align: center; padding: 2rem;">
-            <a href="{login_url}" target="_top">
-                <button style="
-                    width: 100%; height: 60px; font-size: 20px; 
-                    background: #4285f4; color: white; border: none; 
-                    border-radius: 12px; cursor: pointer; box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-                ">
-                    Login with Google
-                </button>
+            <a href="{login_url}" target="_top" style="
+                display: block;
+                width: 100%;
+                height: 60px;
+                line-height: 60px;
+                font-size: 20px;
+                font-family: sans-serif;
+                text-decoration: none;
+                background: #4285f4;
+                color: white;
+                border-radius: 12px;
+                cursor: pointer;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                font-weight: bold;
+            ">
+                Login with Google
             </a>
         </div>
     """, unsafe_allow_html=True)
