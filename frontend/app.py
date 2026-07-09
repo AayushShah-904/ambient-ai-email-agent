@@ -234,7 +234,7 @@ else:
     login_url = f"{PUBLIC_BACKEND_URL}/auth/login"
     st.markdown(f"""
         <div style="text-align: center; padding: 2rem;">
-            <a href="{login_url}" target="_top" style="
+            <a href="{login_url}" target="_blank" style="
                 display: block;
                 width: 100%;
                 height: 60px;
